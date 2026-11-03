@@ -50,7 +50,7 @@ def test_no_large_files_are_tracked():
 def test_no_real_secrets_are_tracked():
     this_file = Path(__file__).relative_to(ROOT).as_posix()
     patterns = [
-        re.compile(r"MODEL_API_KEY\s*=\s*['\"]?(?!test-key|your|<|xxx|changeme|\$)[A-Za-z0-9_\-]{16,}"),
+        re.compile(r"MODEL_API_KEY[ \t]*=[ \t]*['\"]?(?!test-key|your|<|xxx|changeme|\$)[A-Za-z0-9_\-]{16,}"),
         re.compile(r"\b(sk|pk)-[A-Za-z0-9]{20,}"),
         re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"),
         re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
