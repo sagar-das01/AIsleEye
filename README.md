@@ -28,6 +28,7 @@ Agent runs are traced with Langfuse and scored from automatic checks and reviewe
 - [Branching and versioning](#branching-and-versioning)
 - [Roadmap](#roadmap)
 - [Guardrails, privacy and data handling](#guardrails-privacy-and-data-handling)
+- [Reliability and interface](#reliability-and-interface)
 - [Datasets](#datasets)
 
 ---
@@ -44,7 +45,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 
 ## How it works
 
-1. **Scan** — a supervisor uploads a photo of an aisle or pallet.
+1. **Scan** — a supervisor uploads a photo of an aisle or pallet, or takes one with the phone camera 🚧.
 2. **Preprocess** — the upload is validated (type, size, content), oriented, stripped of metadata and downscaled.
 3. **Protect privacy** 🚧 — people in the photo are segmented and blurred before anything is stored, cropped or passed to later stages.
 4. **Segment** — SAM 3.1 is prompted with concepts such as `cardboard box` and `floor tape`, returning a box and a pixel mask for every instance.
@@ -53,7 +54,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 7. **Review** — findings are shown on the image overlay with severity and confidence. Low-confidence results and scans with nothing detected are flagged **needs human review** 🚧. The supervisor approves, rejects or corrects each finding, and rejections are kept as feedback 🚧.
 8. **Guard** 🚧 — an action guard checks every tool call the agent proposes against the approved findings before it runs.
 9. **Dispatch** — a LangChain agent (Muse Spark, LangGraph runtime) calls tools to create a PDF incident ticket, move damaged units to quarantine and append a compliance log entry. Every tool argument is validated before execution, and each action is written to an append-only audit log 🚧.
-10. **Trace and score** 🚧 — one Langfuse trace per scan covers every stage, model call, tool call and guard verdict (never images). Each agent run gets automatic scores, and the supervisor's approve, reject and correct decisions become human scores on the same trace.
+10. **Trace and score** 🚧 — one Langfuse trace per scan covers every stage, model call, tool call and guard verdict (never images). Each agent run gets automatic scores (the agent score). The supervisor's approve, reject and correct decisions on findings become a separate pipeline score on the same trace, because that review judges the vision stages, not the agent.
 
 🚧 marks capabilities that are planned (see the [Roadmap](#roadmap)).
 
@@ -76,7 +77,7 @@ flowchart TD
   end
 
   subgraph OBS ["Observability and scoring"]
-    SCORE["Scoring<br/>automatic + human"] --> SCORES[("Scores log")]
+    SCORE["Scoring<br/>pipeline + agent scores"] --> SCORES[("Scores log")]
     SCORE -.-> LF["Langfuse<br/>traces + scores"]
   end
 
@@ -90,16 +91,17 @@ flowchart TD
   HZ --> F
   F --> CACHE[("Scan cache<br/>retention TTL")]
   F -->|overlay| U
+  DEMO[("Pinned demo store<br/>replay mode")] -.->|"replay banner"| U
   U -->|"reject / correct + reason"| FB[("Feedback log")]
   U -->|approved findings| AG
-  FB -->|human score| SCORE
+  FB -->|pipeline score| SCORE
   AG -->|run outcome| SCORE
   AG -.->|trace| LF
   GUARD -.->|verdicts| LF
   SCORES --> MLF
 ```
 
-The privacy blur, action guard, feedback log and audit log are planned (Phase 5); Langfuse tracing, scoring and MLflow evaluation are planned (Phase 6); the rest follows Phases 1 to 3.
+The privacy blur, action guard, feedback log and audit log are planned (Phase 5); Langfuse tracing, scoring and MLflow evaluation are planned (Phase 6); the pinned demo store and replay mode are planned (Phase 4); the rest follows Phases 1 to 3.
 
 ## Tech stack
 
@@ -193,15 +195,16 @@ Open <http://localhost:3000>. The status indicator in the header turns green whe
 |---|---|---|---|
 | GET | `/health` | ✅ available | Liveness and configured models |
 | POST | `/scan` | 🚧 planned | Image → segmented boxes, walkway mask and findings |
-| POST | `/scan/{scan_id}/approve` | 🚧 planned | Run the agent on approved findings; returns actions, tickets and a `trace_id` |
+| POST | `/scan/{scan_id}/approve` | 🚧 planned | Run the agent on approved findings; returns actions, tickets and a `trace_id`; idempotent, so a repeat call returns the first result |
 | GET | `/inventory` | 🚧 planned | Current inventory, including quarantine |
 | GET | `/tickets` | 🚧 planned | Incident tickets |
 | GET | `/tickets/{id}.pdf` | 🚧 planned | Ticket PDF |
 | GET | `/compliance` | 🚧 planned | Compliance log |
-| POST | `/scan/{scan_id}/feedback` | 🚧 planned | Reject or correct a finding, with a reason; also records a human score on the scan's trace |
+| POST | `/scan/{scan_id}/feedback` | 🚧 planned | Reject or correct a finding, with a reason; also records a pipeline score on the scan's trace |
 | DELETE | `/scan/{scan_id}` | 🚧 planned | Purge a cached scan |
 | GET | `/audit` | 🚧 planned | Audit log of agent actions |
-| GET | `/scores` | 🚧 planned | Agent score summary: composite, components, review count, breakdown by prompt version |
+| GET | `/scores` | 🚧 planned | Pipeline score and agent score summaries: components, sample sizes, breakdown by prompt version |
+| POST | `/tickets/{ticket_id}/feedback` | 🚧 planned (optional) | Rate a created ticket, with an optional corrected team or severity; feeds the agent score |
 
 **Finding schema**
 
@@ -252,12 +255,13 @@ gh pr create --base master --fill
 
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
 - [ ] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
-- [ ] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, `/approve`
-- [ ] **Phase 3** — Frontend: upload, mask overlays, findings review, agent action timeline, live KPIs
-- [ ] **Phase 4** — Demo assets and offline replay mode
+- [ ] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
+- [ ] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states
+- [ ] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner
 - [ ] **Phase 5** — Data handling, privacy and guardrails: shared preprocessing, people blur, retention and purge, agent action guard, audit log, needs-review and feedback flow, dataset preparation and label audit
-- [ ] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator scoring from automatic checks and reviewer feedback, agent score in the dashboard, MLflow evaluation runs on audited labels
+- [ ] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator with separate pipeline and agent scores (reviewer feedback scores the vision stages, the agent score is automatic), both shown in the dashboard with their sample sizes, MLflow evaluation runs on audited labels
 - [ ] **Phase 7** — Hardening: timeouts and retries, prompt-injection regression cases, tracing and evaluation failure drills, accuracy evaluation on audited labels
+- [ ] **Phase 8** — Demo prep: final demo freeze, one-command demo start, pre-demo checklist, dataset attribution, backup video
 - [ ] **Later** — Video scans, on-device inference with Muse Glimmer, PPE and spill detection
 
 ## Guardrails, privacy and data handling
@@ -276,17 +280,17 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 
 ### Privacy
 
-- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. Review the API's data terms before using real facility photos. If Langfuse Cloud is enabled 🚧, prompts, model outputs, tool arguments and scores also go to Langfuse, a third-party processor, but never images (see below); self-hosting is the alternative.
+- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. Review the API's data terms, pricing and rate limits before using real facility photos. If Langfuse Cloud is enabled 🚧, prompts, model outputs, tool arguments and scores also go to Langfuse, a third-party processor, but never images (see below); self-hosting is the alternative.
 - **Metadata** — uploads are size- and type-limited, stripped of EXIF (GPS, device) and downscaled.
 - **People** 🚧 — people are segmented (`person`) and blurred before anything is cached, cropped into a ticket PDF or passed to later model calls. The detection pass itself sees the unblurred image, so blurring protects stored data and later stages, not that first call. If the pass fails, crops are left out of tickets and the scan is flagged.
 - **Minimal storage** — original uploads are not stored, only derived results. There are no user accounts, and scan IDs are content hashes.
-- **Retention** 🚧 — cached scans expire after a configurable number of days (`CACHE_TTL_DAYS`) and can be purged on demand with `DELETE /scan/{scan_id}`.
+- **Retention** 🚧 — cached scans expire after a configurable number of days (`CACHE_TTL_DAYS`) and can be purged on demand with `DELETE /scan/{scan_id}`; neither touches the pinned demo store used for replay.
 - **Secrets** — API keys (Meta Model API, and Langfuse if enabled) live only in the git-ignored root `.env`; nothing secret is committed.
 
 ### Data quality and mislabelled data
 
 - **Needs human review** 🚧 — findings below a configurable confidence threshold are flagged `needs_review` instead of being presented as certain. A scan with nothing detected is an explicit "nothing found" result, never a silent pass, and an image that does not look like a warehouse scene is called out.
-- **Supervisor feedback** 🚧 — a supervisor can reject or correct a finding with a reason. Feedback is kept in a feedback log, becomes a human score for the agent (see below) and is used to evaluate the models; nothing is retrained automatically.
+- **Supervisor feedback** 🚧 — a supervisor can reject or correct a finding with a reason. Feedback is kept in a feedback log, becomes a pipeline score (it judges the vision stages, not the agent; see below) and is used to evaluate the models; nothing is retrained automatically.
 - **Dataset preprocessing** 🚧 — a preparation script samples images, applies the same preprocessing as uploads, renames files by content hash, removes near-duplicates by perceptual hash and writes a manifest with each image's source, license and label.
 - **Label audit** 🚧 — before a dataset is used as ground truth, its labels are checked (schema, class balance, duplicates across splits). Where the model and the label disagree, a person reviews the image; mislabelled or ambiguous images are quarantined and excluded from the metrics.
 
@@ -297,9 +301,20 @@ All of this is planned (Phase 6) and optional: with no Langfuse keys, or MLflow 
 - **Tracing** 🚧 — [Langfuse](https://langfuse.com) records one trace per scan: preprocessing, each SAM call, inspection batches, the hazard check, the agent run, every tool call and every guard verdict. Tracing is a no-op when unconfigured or unreachable and never fails a scan or an agent run.
 - **No images in traces** 🚧 — masking at the Langfuse client drops image URLs, base64 payloads and crop bytes before export, and an offline test fails if any exported span contains one. Langfuse Cloud is a third-party processor for prompts, outputs, tool arguments and scores; self-hosting is the alternative.
 - **Central orchestrator** 🚧 — the single entry point for an approved scan: it runs the LangChain agent, sends every proposed tool call through the action guard, closes the trace and scores the run. If LangChain misbehaves against the Meta Model API (which supports only automatic tool choice), `AGENT_RUNTIME=plain` runs a hand-written loop with the same tools.
-- **Scoring** 🚧 — automatic scores per run (tool-call validity, guard rejections, staying within the iteration cap, latency, tokens) and human scores from the review step (`human_agreement`: approved ÷ reviewed findings, where a correction counts as a miss). A weighted composite agent score (0 to 1, human agreement weighted highest) appears in the dashboard only after a minimum number of reviews, always with the review count. Scores are stored locally in `scores.jsonl` and mirrored to the scan's trace in Langfuse. Scoring is report-only: it never changes prompts, tools or permissions automatically.
-- **Offline evaluation** 🚧 — MLflow tracks evaluation runs on the audited label set: prompt version, model names and thresholds as parameters; damage precision and recall, hazard accuracy, needs-review rate, latency and tokens as metrics; human agreement per prompt version for comparison. MLflow is used for evaluation only (live traces stay in Langfuse and MLflow's LangChain autolog stays off, so nothing is traced twice) and ships as an optional extra (`requirements-eval.txt`).
-- **Planned settings** 🚧 — `LANGFUSE_ENABLED`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `AGENT_RUNTIME`, `SCORE_MIN_REVIEWS`, `MLFLOW_TRACKING_URI`. The backend does not read them yet.
+- **Scoring** 🚧 — two separate scores, because the supervisor's review happens before the agent runs. The **pipeline score** comes from that review (`pipeline_human_agreement`: approved ÷ reviewed findings, where a correction counts as a miss) and judges segmentation and inspection. The **agent score** is automatic (tool-call validity, guard rejections, staying within the iteration cap; latency and tokens are recorded alongside), and an optional post-dispatch rating of the created tickets can be blended in later 🚧. Each score appears in the dashboard with its sample size, and only after a minimum number of reviews or runs. Scores are stored locally in `scores.jsonl` and mirrored to the scan's trace in Langfuse. Scoring is report-only: it never changes prompts, tools or permissions automatically.
+- **Offline evaluation** 🚧 — MLflow tracks evaluation runs on the audited label set: prompt version, model names and thresholds as parameters; damage precision and recall, hazard accuracy, needs-review rate, latency and tokens as metrics; pipeline agreement and agent score per prompt version for comparison. MLflow is used for evaluation only (live traces stay in Langfuse and MLflow's LangChain autolog stays off, so nothing is traced twice) and ships as an optional extra (`requirements-eval.txt`).
+- **Planned settings** 🚧 — `LANGFUSE_ENABLED`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `AGENT_RUNTIME`, `SCORE_MIN_REVIEWS`, `MLFLOW_TRACKING_URI`, `MUSE_REASONING_EFFORT`, `DEMO_MODE`. The backend does not read them yet.
+
+## Reliability and interface
+
+Planned (Phases 2 to 4 and 8); items marked 🚧 are not built yet.
+
+- **Safe state changes** 🚧 — inventory, ticket, compliance, audit, feedback and score files are written atomically (temp file, then rename, with a per-file lock). Approving a scan is idempotent: a repeated or double-clicked request returns the first result and creates no second ticket or inventory change.
+- **Demo replay** 🚧 — pre-run results for the demo images live in a pinned store that the retention purge never touches. Replay mode, or an unavailable API, serves them behind a visible "replay" banner; replayed results are never presented as live.
+- **Latency** 🚧 — the target is under 20 seconds for a scan plus approval. In testing, a trivial Muse Spark reply took 13.7 seconds at default reasoning, so inspection and the agent use a low reasoning effort, the SAM calls run concurrently, all crops go in one inspection request, and every stage's time is recorded.
+- **Phone-first** 🚧 — upload takes a photo from the phone camera or the gallery, and narrow screens get a single-column layout with large touch targets.
+- **Accessible overlays** 🚧 — colour is never the only signal: damaged boxes use red with a hatched fill and an icon, blocked walkways a yellow dashed outline and an icon, and every finding has a text label. Nothing flashes, and reduced-motion settings are honoured.
+- **Main states** 🚧 — nothing detected, API unavailable, replay, people-blur failed, rejected findings and actions rejected by the guard each have an explicit, visible state.
 
 ## Datasets
 
