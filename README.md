@@ -86,7 +86,8 @@ flowchart LR
 │   ├── app/
 │   │   ├── main.py          # FastAPI app, CORS, /health
 │   │   ├── config.py        # Settings loaded from the root .env
-│   │   └── clients.py       # Meta Model API client + image helpers
+│   │   ├── clients.py       # Meta Model API client + image helpers
+│   │   └── pipeline/        # SAM segmentation, damage inspection, hazards, /scan orchestration
 │   ├── scripts/
 │   │   └── smoke_test.py    # Verifies every model capability end to end
 │   ├── tests/               # pytest suite (offline)
@@ -175,7 +176,8 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | Method | Path | Status | Purpose |
 |---|---|---|---|
 | GET | `/health` | ✅ available | Liveness and configured models |
-| POST | `/scan` | 🚧 planned | Image → segmented boxes, walkway mask and findings |
+| POST | `/scan` | ✅ available | Image → segmented boxes, walkway mask and findings |
+| GET | `/scan/{scan_id}` | ✅ available | Cached scan result (demo replay) |
 | POST | `/scan/{scan_id}/approve` | 🚧 planned | Run the agent on approved findings |
 | GET | `/inventory` | 🚧 planned | Current inventory, including quarantine |
 | GET | `/tickets` | 🚧 planned | Incident tickets |
@@ -226,7 +228,7 @@ gh pr create --base master --fill
 ## Roadmap
 
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
-- [ ] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
+- [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
 - [ ] **Phase 2** — Agent and tools: ticket PDFs, inventory quarantine, compliance log, `/approve`
 - [ ] **Phase 3** — Frontend: upload, mask overlays, findings review, agent action timeline, live KPIs
 - [ ] **Phase 4** — Demo assets and offline replay mode
