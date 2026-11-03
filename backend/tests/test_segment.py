@@ -26,12 +26,12 @@ def test_none_output_text_treated_as_empty(monkeypatch):
 
 def test_request_shape(monkeypatch):
     calls = install_fake_model(monkeypatch, lambda kw: "").calls
-    run(seg.segment(URL, "floor tape", width=W, height=H))
+    run(seg.segment(URL, "yellow line", width=W, height=H))
     kw = calls[0]
     assert kw["model"] == "sam-3.1"
     assert kw["metadata"] == {"mask_encoding": "one_bit", "include_confidence": "true"}
     content = kw["input"][0]["content"]
-    assert content == [{"type": "input_text", "text": "floor tape"}, {"type": "input_image", "image_url": URL}]
+    assert content == [{"type": "input_text", "text": "yellow line"}, {"type": "input_image", "image_url": URL}]
 
 
 def test_real_mask_is_placed_at_box_offset(monkeypatch):
@@ -91,6 +91,6 @@ def test_segment_all_runs_each_concept(monkeypatch):
 
     calls = install_fake_model(monkeypatch, handler).calls
     out = run(seg.segment_all(URL, width=W, height=H))
-    assert sorted(concept_of(c) for c in calls) == ["cardboard box", "floor tape"]
+    assert sorted(concept_of(c) for c in calls) == ["cardboard box", "yellow line"]
     assert [s.id for s in out["box"]] == ["box_0"]
     assert out["walkway"] == []

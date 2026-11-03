@@ -6,7 +6,7 @@ import logging
 from PIL import Image
 from pydantic import BaseModel, ValidationError
 
-from app.clients import bytes_to_data_url, get_async_client
+from app.clients import bytes_to_data_url, get_async_client, reasoning_kwargs
 from app.config import get_settings
 from app.schemas import BBox, DamageAssessment, DamageType, Finding, Severity
 
@@ -109,6 +109,7 @@ async def _inspect_chunk(crop_urls: list[str]) -> list[DamageAssessment | None]:
         model=get_settings().muse_model,
         input=[{"type": "message", "role": "user", "content": content}],
         text={"format": {"type": "json_schema", "name": "BoxInspection", "schema": INSPECTION_SCHEMA, "strict": True}},
+        **reasoning_kwargs(),
     )
     return parse_assessments(response.output_text or "", len(crop_urls))
 

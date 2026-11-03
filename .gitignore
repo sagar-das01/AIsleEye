@@ -6,3 +6,5 @@ plan/
 __pycache__/
 backend/data/smoke/
 backend/data/cache/
+.coverage
+htmlcov/

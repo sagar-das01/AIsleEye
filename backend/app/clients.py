@@ -3,6 +3,7 @@ import ssl
 from functools import lru_cache
 from pathlib import Path
 
+import httpx
 import truststore
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, DefaultHttpxClient, OpenAI
 
@@ -49,3 +50,25 @@ def file_to_data_url(path: Path) -> str:
     if mime is None:
         raise ValueError(f"Unsupported image type: {path.suffix}")
     return bytes_to_data_url(path.read_bytes(), mime)
+
+
+def reasoning_kwargs() -> dict:
+    effort = get_settings().muse_reasoning_effort
+    return {"reasoning": {"effort": effort}} if effort else {}
+
+
+def get_chat_model(model: str | None = None):
+    # Imported lazily: only the agent stage needs LangChain.
+    from langchain_openai import ChatOpenAI
+
+    s = get_settings()
+    return ChatOpenAI(
+        model=model or s.muse_model,
+        base_url=s.model_api_base_url,
+        api_key=s.model_api_key,
+        timeout=s.request_timeout_s,
+        max_retries=2,
+        http_client=httpx.Client(verify=_tls_context()),
+        http_async_client=httpx.AsyncClient(verify=_tls_context()),
+        **({"reasoning_effort": s.muse_reasoning_effort} if s.muse_reasoning_effort else {}),
+    )

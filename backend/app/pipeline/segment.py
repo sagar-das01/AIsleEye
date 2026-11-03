@@ -21,8 +21,14 @@ from app.schemas import BBox
 
 logger = logging.getLogger(__name__)
 
-# Scan label -> SAM concept. SAM accepts exactly one noun phrase per request.
-CONCEPTS: dict[str, str] = {"box": "cardboard box", "walkway": "floor tape"}
+BOX_CONCEPT = "cardboard box"
+
+
+def concepts() -> dict[str, str]:
+    # Scan label -> SAM concept; SAM accepts exactly one noun phrase per request.
+    return {"box": BOX_CONCEPT, "walkway": get_settings().walkway_concept}
+
+
 SAM_METADATA = {"mask_encoding": "one_bit", "include_confidence": "true"}
 
 _SVG_POINT = re.compile(r"([ML])(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)")
@@ -130,8 +136,9 @@ async def segment(image_data_url: str, concept: str, *, width: int, height: int,
 
 
 async def segment_all(image_data_url: str, *, width: int, height: int) -> dict[str, list[Segment]]:
-    labels = list(CONCEPTS)
+    wanted = concepts()
+    labels = list(wanted)
     results = await asyncio.gather(
-        *(segment(image_data_url, CONCEPTS[label], width=width, height=height, id_prefix=label) for label in labels)
+        *(segment(image_data_url, wanted[label], width=width, height=height, id_prefix=label) for label in labels)
     )
     return dict(zip(labels, results, strict=True))
