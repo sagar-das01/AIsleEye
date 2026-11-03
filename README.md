@@ -24,6 +24,7 @@ Agent runs are traced with Langfuse and scored from automatic checks and reviewe
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
+- [Testing](#testing)
 - [API](#api)
 - [Branching and versioning](#branching-and-versioning)
 - [Roadmap](#roadmap)
@@ -127,7 +128,9 @@ The privacy blur, action guard, feedback log and audit log are planned (Phase 5)
 │   │   └── clients.py       # Meta Model API client + image helpers
 │   ├── scripts/
 │   │   └── smoke_test.py    # Verifies every model capability end to end
-│   └── requirements.txt
+│   ├── tests/               # pytest suite (offline)
+│   ├── requirements.txt
+│   └── requirements-dev.txt
 ├── frontend/
 │   └── src/
 │       ├── app/             # Dashboard page, layout, dark industrial theme
@@ -135,7 +138,7 @@ The privacy blur, action guard, feedback log and audit log are planned (Phase 5)
 │       └── lib/api.ts       # Typed API client
 └── .github/
     ├── scripts/next_version.sh
-    └── workflows/           # branch-name.yml, release.yml
+    └── workflows/           # ci.yml, branch-name.yml, release.yml
 ```
 
 ## Getting started
@@ -188,6 +191,23 @@ npm run dev
 ```
 
 Open <http://localhost:3000>. The status indicator in the header turns green when the backend is reachable.
+
+## Testing
+
+Unit tests run offline — model calls are faked, so no API key or network is needed.
+
+```bash
+# Backend (pytest): config, API client, /health + CORS, smoke-test parsers, release versioning script
+cd backend
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+
+# Frontend (Vitest + React Testing Library): API client, backend status, dashboard
+cd frontend
+npm test            # or: npm run test:watch
+```
+
+The **CI** workflow runs backend tests, frontend lint, tests and production build on every pull request to `master`. The live `scripts.smoke_test` stays a manual check because it calls the real Meta Model API.
 
 ## API
 
