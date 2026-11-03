@@ -1,0 +1,19 @@
+name: Branch name check
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch prefix
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          pattern='^(major|breaking|release|feature|feat|fix|bug|bugfix|hotfix|chore|docs|ci|refactor|test)/[a-z0-9._-]+$'
+          if [[ ! "$BRANCH" =~ $pattern ]]; then
+            echo "::error::Branch '$BRANCH' must match <type>/<short-name>. Types: major, breaking, release, feature, feat, fix, bug, bugfix, hotfix, chore, docs, ci, refactor, test"
+            exit 1
+          fi

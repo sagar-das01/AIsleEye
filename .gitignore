@@ -1,0 +1,7 @@
+.env
+
+plan/
+
+.venv/
+__pycache__/
+backend/data/smoke/
