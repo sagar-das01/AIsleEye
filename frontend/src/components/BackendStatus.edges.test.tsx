@@ -1,9 +1,20 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { Component, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
 
 import { BackendStatus } from "./BackendStatus";
+
+class Boundary extends Component<{ children: ReactNode }, { crashed: boolean }> {
+  state = { crashed: false };
+  static getDerivedStateFromError() {
+    return { crashed: true };
+  }
+  render() {
+    return this.state.crashed ? "render crashed" : this.props.children;
+  }
+}
 
 afterEach(() => {
   cleanup();
@@ -80,7 +91,15 @@ describe("BackendStatus edges", () => {
     expect(screen.queryByText("Connecting…")).toBeNull();
   });
 
-  // Gap found in review: a 200 response with an unexpected shape throws during render
-  // (state.health.models is undefined) instead of showing "Backend offline".
-  it.todo("shows offline when /health returns an unexpected JSON shape");
+  // GAP: a 200 with an unexpected shape throws during render (health.models is undefined); remove `.fails` once fixed.
+  it.fails("shows offline when /health returns an unexpected JSON shape", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(api, "health").mockResolvedValue({ status: "ok" } as never);
+    render(
+      <Boundary>
+        <BackendStatus />
+      </Boundary>,
+    );
+    expect(await screen.findByText("Backend offline")).toBeDefined();
+  });
 });
