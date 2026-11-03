@@ -102,7 +102,7 @@ def test_check_sam_sends_sam_metadata_and_saves_raw_output(monkeypatch, out_dir)
     responses = fake_client(monkeypatch, SimpleNamespace(output_text="<0f>"))
     summary = smoke_test.check_sam("sam-x", "u")
     assert all(c["metadata"] == {"mask_encoding": "one_bit", "include_confidence": "true"} for c in responses.calls)
-    assert (out_dir / "sam_raw_cardboard_box.txt").exists() and (out_dir / "sam_raw_floor_tape.txt").exists()
+    assert (out_dir / "sam_raw_cardboard_box.txt").exists() and (out_dir / "sam_raw_yellow_line.txt").exists()
     assert "0 boxes / 0 masks" in summary
 
 
@@ -135,7 +135,7 @@ def test_mask_header_without_confidence():
 
 
 def test_sam_prompts_are_one_concept_each():
-    assert smoke_test.SAM_PROMPTS == ["cardboard box", "floor tape"]
+    assert smoke_test.SAM_PROMPTS == ["cardboard box", "yellow line"]
     assert all("," not in p and " and " not in p for p in smoke_test.SAM_PROMPTS)
 
 
@@ -150,7 +150,7 @@ def test_synthetic_scene_has_expected_size_and_content(tmp_path):
 
 
 def _install_checks(monkeypatch, results):
-    names = ["check_text", "check_vision", "check_structured", "check_tools", "check_sam"]
+    names = ["check_text", "check_vision", "check_structured", "check_tools", "check_sam", "check_langchain_agent", "check_langfuse"]
     for name, result in zip(names, results, strict=True):
         def fn(model, url, _r=result):
             if isinstance(_r, BaseException):
@@ -161,24 +161,24 @@ def _install_checks(monkeypatch, results):
 
 def test_main_returns_zero_when_all_checks_pass(monkeypatch, out_dir, capsys):
     monkeypatch.setattr("sys.argv", ["smoke_test"])
-    _install_checks(monkeypatch, ["a", "b", "c", "d", "e"])
+    _install_checks(monkeypatch, ["a", "b", "c", "d", "e", "f", "g"])
     assert smoke_test.main() == 0
     out = capsys.readouterr().out
-    assert out.count("PASS") == 5 and "5/5 passed" in out
+    assert out.count("PASS") == 7 and "7/7 passed" in out
     assert (out_dir / "synthetic_scene.png").exists()
 
 
 def test_main_returns_one_and_reports_every_failure(monkeypatch, out_dir, capsys):
     monkeypatch.setattr("sys.argv", ["smoke_test"])
-    _install_checks(monkeypatch, ["a", RuntimeError("boom"), "c", ValueError("bad"), "e"])
+    _install_checks(monkeypatch, ["a", RuntimeError("boom"), "c", ValueError("bad"), "e", "f", "g"])
     assert smoke_test.main() == 1
     out = capsys.readouterr().out
-    assert out.count("FAIL") == 2 and "RuntimeError: boom" in out and "3/5 passed" in out
+    assert out.count("FAIL") == 2 and "RuntimeError: boom" in out and "5/7 passed" in out
 
 
 def test_main_never_prints_the_api_key(monkeypatch, out_dir, capsys):
     monkeypatch.setattr("sys.argv", ["smoke_test"])
-    _install_checks(monkeypatch, ["a"] * 5)
+    _install_checks(monkeypatch, ["a"] * 7)
     smoke_test.main()
     assert "test-key" not in capsys.readouterr().out
 
@@ -189,7 +189,7 @@ def test_main_uses_a_supplied_image(monkeypatch, out_dir, capsys, tmp_path):
     monkeypatch.setattr("sys.argv", ["smoke_test", "--image", str(img)])
     seen = []
     monkeypatch.setattr(smoke_test, "check_text", lambda m, u: seen.append(u) or "ok")
-    _install_checks_rest = ["check_vision", "check_structured", "check_tools", "check_sam"]
+    _install_checks_rest = ["check_vision", "check_structured", "check_tools", "check_sam", "check_langchain_agent", "check_langfuse"]
     for name in _install_checks_rest:
         monkeypatch.setattr(smoke_test, name, lambda m, u: "ok")
     assert smoke_test.main() == 0

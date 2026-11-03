@@ -151,19 +151,13 @@ The privacy blur, action guard, feedback log and audit log are planned (Phase 5)
 
 ### 1. Configure environment
 
-Create a `.env` file in the repository root (it is git-ignored):
+Copy the example file to the repository root and add your key (`.env` is git-ignored):
 
-```dotenv
-MODEL_API_KEY=your_key_here
-MODEL_API_BASE_URL=https://api.meta.ai/v1
-MUSE_MODEL=muse-spark-1.3
-SAM_MODEL=sam-3.1
-MUSE_AGENT_MODEL=muse-wonder-1.0
-REQUEST_TIMEOUT_S=90
-CORS_ORIGINS=["http://localhost:3000"]
+```bash
+cp .env.example .env   # then set MODEL_API_KEY
 ```
 
-Only `MODEL_API_KEY` is required; the rest have sensible defaults.
+Only `MODEL_API_KEY` is required. [`.env.example`](.env.example) lists every setting with its default; the Langfuse keys stay empty unless you enable tracing, and `MUSE_MODEL`, `SAM_MODEL` and `MUSE_AGENT_MODEL` must be Standard mode models (the app refuses `*-contributor` IDs, see [Privacy](#privacy)).
 
 ### 2. Backend
 
@@ -172,14 +166,30 @@ cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Verify text, vision, structured output, tool calling and SAM 3.1
+# Verify text, vision, structured output, tool calling, SAM 3.1, a LangChain agent (and Langfuse if configured)
 .venv/bin/python -m scripts.smoke_test --image path/to/warehouse.jpg
+
+# Time vision and structured calls at each reasoning effort
+.venv/bin/python -m scripts.smoke_test --latency
 
 # Run the API
 .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-The smoke test prints `PASS`/`FAIL` per capability and saves raw outputs to `backend/data/smoke/`. Without `--image` it renders a synthetic scene.
+The smoke test prints `PASS`, `FAIL` or `SKIP` (an optional integration that is not configured) per capability and saves raw outputs and `report.json` to `backend/data/smoke/`. Without `--image` it renders a synthetic scene.
+
+#### What the live smoke test established
+
+| Question | Answer |
+|---|---|
+| Do text, image, structured output and tool calling work on `muse-spark-1.3`? | Yes, all four. |
+| Does SAM 3.1 return parseable boxes and masks? | Yes; one concept per request, and the reported frame (`w`/`h`) equals the image sent. |
+| Which phrase finds walkway tape? | `floor tape` and `floor safety tape` matched nothing on the test scene; colour phrases did (`yellow line` 0.90, `yellow floor tape` 0.60). The default is `WALKWAY_CONCEPT=yellow line`; verify on real photos. |
+| Does a LangChain agent work against the Meta API? | Yes: `create_agent` over Chat Completions completes a tool call and a final answer (about 5 s); the Responses API also works but returns block-list content and took about 8 s. `AGENT_RUNTIME=langchain` stays the default. |
+| Which reasoning efforts are valid? | `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; `none` is rejected. |
+| How long does a call take? | One image call took 15 s by default and 2.8 s at `minimal` (110 vs 1442 output tokens); `low` 5.6 s, `medium` 10.9 s, `high` 12.8 s. The default is `MUSE_REASONING_EFFORT=minimal`; check inspection quality on real photos before lowering it further. |
+
+Per-image latency was measured on one synthetic scene; treat it as a baseline, not a guarantee.
 
 ### 3. Frontend
 
@@ -300,7 +310,8 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 
 ### Privacy
 
-- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. Review the API's data terms, pricing and rate limits before using real facility photos. If Langfuse Cloud is enabled 🚧, prompts, model outputs, tool arguments and scores also go to Langfuse, a third-party processor, but never images (see below); self-hosting is the alternative.
+- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. In Standard mode (`muse-spark-1.3`, `sam-3.1`, `muse-wonder-1.0`) Meta states that prompts, files and responses are not used to train its models; the `*-contributor` Muse Spark variants are cheaper in exchange for allowing exactly that, so the app refuses them. Check the current [data terms](https://dev.meta.ai/docs/pricing-rate-limits#pricing-modes) before using real facility photos. If Langfuse Cloud is enabled 🚧, prompts, model outputs, tool arguments and scores also go to Langfuse, a third-party processor, but never images (see below); self-hosting is the alternative.
+- **Cost and limits** — pay-as-you-go prices from the [pricing page](https://dev.meta.ai/docs/pricing-rate-limits): SAM 3.1 $2.50 per 1,000 images (a scan makes two calls, about $0.005); `muse-spark-1.3` $1.25 per million input and $4.25 per million output tokens. A scan with a handful of crops at minimal reasoning is roughly two to three cents; measure it from `usage` once real photos run. Limits per team: 3,000 requests per minute for `sam-3.1` and `muse-spark-1.3` (4 M tokens per minute for Muse). The client retries 429s and 5xx responses twice.
 - **Metadata** — uploads are size- and type-limited, stripped of EXIF (GPS, device) and downscaled.
 - **People** 🚧 — people are segmented (`person`) and blurred before anything is cached, cropped into a ticket PDF or passed to later model calls. The detection pass itself sees the unblurred image, so blurring protects stored data and later stages, not that first call. If the pass fails, crops are left out of tickets and the scan is flagged.
 - **Minimal storage** — original uploads are not stored, only derived results. There are no user accounts, and scan IDs are content hashes.
