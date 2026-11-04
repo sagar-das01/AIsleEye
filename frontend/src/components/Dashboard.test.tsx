@@ -18,11 +18,18 @@ const ticket = (status: string) => ({ ticket_id: `T-${status}`, finding_id: "f",
 let scan: MockInstance<typeof api.scan>;
 let approve: MockInstance<typeof api.approve>;
 let tickets: MockInstance<typeof api.tickets>;
+let scores: MockInstance<typeof api.scores>;
+
+const NO_SCORES = {
+  pipeline_agreement: { value: null, n: 2, label: "n/a (2 so far)" },
+  agent_score: { value: null, n: 0, label: "n/a (0 so far)" },
+};
 
 beforeEach(() => {
   scan = vi.spyOn(api, "scan").mockResolvedValue(makeScan());
   approve = vi.spyOn(api, "approve").mockResolvedValue(makeApprove());
   tickets = vi.spyOn(api, "tickets").mockResolvedValue([]);
+  scores = vi.spyOn(api, "scores").mockResolvedValue(NO_SCORES);
   vi.spyOn(api, "inventory").mockResolvedValue({ "SKU-1042": { available: 5, quarantine: 3 }, "SKU-2": { available: 1, quarantine: 2 } });
   vi.spyOn(api, "demos").mockResolvedValue([]);
   vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "" });
@@ -65,6 +72,37 @@ describe("Dashboard: first load", () => {
     render(<Dashboard />);
     expect(await screen.findByText("Upload a warehouse photo to scan")).toBeDefined();
     expect(kpi("Open tickets")).toBe("0");
+  });
+
+  it("shows the pipeline agreement and agent score with their sample sizes", async () => {
+    render(<Dashboard />);
+    await waitFor(() => expect(kpi("Pipeline agreement")).toBe("n/a (2 so far)"));
+    expect(kpi("Agent score")).toBe("n/a (0 so far)");
+    cleanup();
+    scores.mockResolvedValue({
+      pipeline_agreement: { value: 0.83, n: 6, label: "83% (n=6)" },
+      agent_score: { value: 0.9, n: 7, label: "0.90 (n=7)" },
+    });
+    render(<Dashboard />);
+    await waitFor(() => expect(kpi("Pipeline agreement")).toBe("83% (n=6)"));
+    expect(kpi("Agent score")).toBe("0.90 (n=7)");
+  });
+
+  it("shows n/a for the score cards when the scores cannot be loaded", async () => {
+    scores.mockRejectedValue(new Error("down"));
+    render(<Dashboard />);
+    expect(await screen.findByText("Upload a warehouse photo to scan")).toBeDefined();
+    expect(kpi("Pipeline agreement")).toBe("n/a");
+    expect(kpi("Agent score")).toBe("n/a");
+  });
+
+  it("refreshes the scores after a rejection and after an approval", async () => {
+    vi.spyOn(api, "rejectFinding").mockResolvedValue({});
+    await upload();
+    fireEvent.click((await screen.findAllByRole("button", { name: /Reject: not a real issue/ }))[0]);
+    await waitFor(() => expect(scores).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    await waitFor(() => expect(scores).toHaveBeenCalledTimes(3));
   });
 });
 

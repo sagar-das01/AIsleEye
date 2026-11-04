@@ -7,7 +7,7 @@ import openai
 from fastapi import FastAPI, File, HTTPException, Path, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import replay, retention
+from app import observability, replay, retention
 from app.config import get_settings
 from app.pipeline import scan as scan_pipeline
 from app.pipeline.scan import ALLOWED_MIME_TYPES, InvalidImageError, load_cached, load_image, run_scan, scan_id_for
@@ -15,6 +15,7 @@ from app.replay import load_pinned
 from app.routes_agent import router as agent_router
 from app.routes_demo import router as demo_router
 from app.routes_feedback import router as feedback_router
+from app.routes_scores import router as scores_router
 from app.schemas import ScanResult
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     retention.purge_expired(scan_pipeline.CACHE_DIR, get_settings().cache_ttl_days)
+    observability.init()
     yield
+    observability.shutdown()
 
 
 app = FastAPI(title="AIsleEye", version="0.1.0", lifespan=lifespan)
@@ -41,6 +44,7 @@ app.add_middleware(
 app.include_router(agent_router)
 app.include_router(demo_router)
 app.include_router(feedback_router)
+app.include_router(scores_router)
 
 
 @app.get("/health")

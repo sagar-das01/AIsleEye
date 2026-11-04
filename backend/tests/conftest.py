@@ -36,3 +36,13 @@ def _clear_caches():
     get_settings.cache_clear()
     get_client.cache_clear()
     get_async_client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_scores(tmp_path_factory, monkeypatch):
+    # Without this, every test that runs an agent would append to the developer's real score log.
+    from app import observability, scoring
+
+    monkeypatch.setattr(scoring, "SCORES_PATH", tmp_path_factory.mktemp("scores") / "scores.jsonl")
+    yield
+    observability.shutdown()

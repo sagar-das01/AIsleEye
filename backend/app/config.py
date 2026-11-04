@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     muse_model: str = "muse-spark-1.3"
     sam_model: str = "sam-3.1"
     muse_agent_model: str = "muse-wonder-1.0"
+    # Which backend/prompts/inspect_<name>.txt the inspection uses; the name is logged with every score.
+    inspect_prompt: str = Field("v1", pattern=r"^[a-z0-9_]+$")
     # Measured in Phase 0: "minimal" answered an image prompt in ~5 s vs ~16 s with the model default.
     muse_reasoning_effort: ReasoningEffort = "minimal"
     # SAM matches short noun phrases literally; "floor tape" found nothing on the test scene, a colour did.

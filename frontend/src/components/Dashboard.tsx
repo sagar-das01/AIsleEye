@@ -8,7 +8,7 @@ import { FindingsList } from "@/components/FindingsList";
 import { KpiStrip } from "@/components/KpiStrip";
 import { ScanOverlay } from "@/components/ScanOverlay";
 import { UploadPanel } from "@/components/UploadPanel";
-import { api, type ApproveResult, type DemoPhoto, type Inventory, type ScanResult, type Ticket } from "@/lib/api";
+import { api, type ApproveResult, type DemoPhoto, type Inventory, type ScanResult, type Scores, type Ticket } from "@/lib/api";
 import { describeError, type FriendlyError } from "@/lib/scan";
 
 type Phase = "idle" | "scanning" | "scanned" | "approving" | "approved";
@@ -33,15 +33,17 @@ export function Dashboard() {
   const [scans, setScans] = useState(0);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [inventory, setInventory] = useState<Inventory>({});
+  const [scores, setScores] = useState<Scores | null>(null);
   const [demos, setDemos] = useState<DemoPhoto[]>([]);
   const [demoMode, setDemoMode] = useState("");
   const [suggestedSku, setSuggestedSku] = useState<string | undefined>();
   const busy = useRef(false);
 
   const loadTotals = useCallback(async () => {
-    const [t, i] = await Promise.allSettled([api.tickets(), api.inventory()]);
+    const [t, i, s] = await Promise.allSettled([api.tickets(), api.inventory(), api.scores()]);
     if (t.status === "fulfilled") setTickets(t.value);
     if (i.status === "fulfilled") setInventory(i.value);
+    if (s.status === "fulfilled") setScores(s.value);
   }, []);
 
   useEffect(() => {
@@ -131,6 +133,8 @@ export function Dashboard() {
           { label: "Open tickets", value: tickets.filter((t) => t.status === "open").length },
           { label: "Units quarantined", value: quarantined },
           { label: "Walkway hazards", value: hazards },
+          { label: "Pipeline agreement", value: scores?.pipeline_agreement.label ?? "n/a" },
+          { label: "Agent score", value: scores?.agent_score.label ?? "n/a" },
         ]}
       />
 
@@ -202,7 +206,7 @@ export function Dashboard() {
                 pending={phase === "approving"}
                 disabled={phase === "approved" || phase === "scanning"}
                 onApprove={(ids, skus) => void runApprove(ids, skus)}
-                onReject={(id) => void api.rejectFinding(scan.scan_id, id).catch(() => undefined)}
+                onReject={(id) => void api.rejectFinding(scan.scan_id, id).then(loadTotals, () => undefined)}
               />
             ) : (
               <p className="mt-3 text-sm text-zinc-500">No scan yet.</p>

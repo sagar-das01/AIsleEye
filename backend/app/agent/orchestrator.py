@@ -1,17 +1,18 @@
-import hashlib
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
-from app import audit
+from app import audit, observability, scoring
 from app.agent import rules, tools
 from app.clients import get_chat_model
 from app.config import BACKEND_DIR, get_settings
 from app.guard import Guard
+from app.pipeline.inspect import prompt_version as inspect_prompt_version
 from app.sanitize import sanitize_text
 from app.schemas import ScanResult
 
@@ -89,13 +90,16 @@ class RunResult:
     error: str | None = None
     summary: str | None = None
     fallback: str | None = None
+    runtime: str = ""
+    latency_ms: int = 0
+    tokens: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
 def trace_id_for(scan_id: str) -> str:
-    return hashlib.sha256(scan_id.encode()).hexdigest()[:32]
+    return observability.trace_id_for(scan_id)
 
 
 # ---- executing one proposed call: validate, guard, run, audit -------------------------------------------------------
@@ -105,25 +109,36 @@ class _Executor:
         self.scan_id = scan_id
         self.guard = guard
         self.actions: list[ActionRecord] = []
+        self.duplicates = 0
 
     def run(self, name: str, args: Any) -> ActionRecord:
         args = dict(args) if isinstance(args, dict) else {}
-        record = self._decide(name, args)
+        with observability.span(f"tool:{name}", as_type="tool", input=args) as obs:
+            record = self._decide(name, args)
+            observability.update(obs, output={"status": record.status, "reason": record.reason}, level="WARNING" if record.status != "executed" else "DEFAULT")
         self.actions.append(record)
         audit.record(self.scan_id, args.get("finding_id"), name, args, record.status, record.reason)
         return record
 
+    def _verdict(self, name: str, args: dict):
+        with observability.span("guard", as_type="guardrail", tool=name) as obs:
+            verdict = self.guard.evaluate(name, args)
+            observability.update(obs, output={"allowed": verdict.allowed, "reason": verdict.reason or None})
+        if not verdict.allowed and verdict.duplicate_of:
+            self.duplicates += 1
+        return verdict
+
     def _decide(self, name: str, args: dict) -> ActionRecord:
         spec = TOOL_MODELS.get(name)
         if spec is None:
-            return self._rejected(name, args, self.guard.evaluate(name, args).reason)
+            return self._rejected(name, args, self._verdict(name, args).reason)
         try:
             validated = spec[0].model_validate(args).model_dump()
         except ValidationError as exc:
             self.guard.tick()
             fields = ", ".join(sorted({".".join(map(str, e["loc"])) or "arguments" for e in exc.errors()}))
             return ActionRecord(name, args, "invalid", f"Invalid arguments ({fields}).")
-        verdict = self.guard.evaluate(name, validated)
+        verdict = self._verdict(name, validated)
         if not verdict.allowed:
             return self._rejected(name, args, verdict.reason)
         try:
@@ -251,7 +266,8 @@ def _run_langchain(executor: _Executor, system: str, user: str, result: RunResul
     try:
         agent = create_agent(get_chat_model(), tools=lc_tools, system_prompt=system)
         out = agent.invoke(
-            {"messages": [{"role": "user", "content": user}]}, config={"recursion_limit": 2 * MAX_ITERATIONS + 1}
+            {"messages": [{"role": "user", "content": user}]},
+            config={"recursion_limit": 2 * MAX_ITERATIONS + 1, "callbacks": observability.langchain_callbacks()},
         )
     except GraphRecursionError:
         result.within_iteration_cap = False
@@ -263,6 +279,9 @@ def _run_langchain(executor: _Executor, system: str, user: str, result: RunResul
         return
     messages = out["messages"]
     result.iterations = sum(1 for m in messages if m.type == "ai")
+    usage = [getattr(m, "usage_metadata", None) or {} for m in messages if m.type == "ai"]
+    if any(usage):
+        result.tokens = {"in": sum(u.get("input_tokens", 0) for u in usage), "out": sum(u.get("output_tokens", 0) for u in usage)}
     # LangChain answers calls to unknown tools itself, so record those here: rejected and audited like any other.
     for m in messages:
         for call in getattr(m, "tool_calls", None) or []:
@@ -306,21 +325,60 @@ def run_approved_scan(
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
     use_rules = step is None and (settings.demo_mode == "replay" or settings.agent_runtime == "rules")
-    if use_rules:
-        _run_rules(scan, approved, executor, messages, result)
-    elif step is None and settings.agent_runtime == "langchain":
-        _run_langchain(executor, system, user, result)
-    else:
-        _run_plain(step or default_step, executor, messages, result)
+    result.runtime = "rules" if use_rules else ("plain" if step is not None else settings.agent_runtime)
+    started = time.perf_counter()
+    with observability.span(
+        "approve", scan_id=scan.scan_id, as_type="chain", approved=len(approved), runtime=result.runtime,
+        agent_prompt_version=PROMPT_VERSION, max_tool_calls=settings.guard_max_tool_calls, max_iterations=MAX_ITERATIONS,
+    ) as root:
+        with observability.span("agent_run", as_type="agent", model=settings.muse_model, runtime=result.runtime):
+            if use_rules:
+                _run_rules(scan, approved, executor, messages, result)
+            elif step is None and settings.agent_runtime == "langchain":
+                _run_langchain(executor, system, user, result)
+            else:
+                _run_plain(step or default_step, executor, messages, result)
 
-    if result.error and step is None and not use_rules and not any(a.status == "executed" for a in executor.actions):
-        # The model failed before anything happened, so the built-in rules can dispatch without double actions.
-        logger.warning("Agent model unavailable; dispatching with the built-in rules")
-        result = RunResult(trace_id=result.trace_id, fallback="rules")
-        executor = _Executor(scan.scan_id, _fresh_guard(scan, approved, settings))
-        _run_rules(scan, approved, executor, messages, result)
-    result.actions = executor.actions
+            if result.error and step is None and not use_rules and not any(a.status == "executed" for a in executor.actions):
+                # The model failed before anything happened, so the built-in rules can dispatch without double actions.
+                logger.warning("Agent model unavailable; dispatching with the built-in rules")
+                result = RunResult(trace_id=result.trace_id, fallback="rules", runtime="rules")
+                executor = _Executor(scan.scan_id, _fresh_guard(scan, approved, settings))
+                _run_rules(scan, approved, executor, messages, result)
+        result.actions = executor.actions
+        result.latency_ms = round((time.perf_counter() - started) * 1000)
+        observability.update(root, output={
+            "executed": sum(a.status == "executed" for a in executor.actions), "actions": len(executor.actions),
+            "iterations": result.iterations, "within_iteration_cap": result.within_iteration_cap, "fallback": result.fallback,
+        })
+    _record_scores(scan.scan_id, approved, result, executor, settings)
     return result
+
+
+def _record_scores(scan_id: str, approved: list[str], result: RunResult, executor: _Executor, settings) -> None:
+    """Automatic agent scores and the pipeline score for the approved findings. Scoring never fails a run."""
+    try:
+        proposed = len(executor.actions)
+        rejections = sum(a.status == "rejected" for a in executor.actions)
+        scores: dict[str, Any] = {
+            "guard_rejections": rejections,
+            "duplicate_avoided": executor.duplicates,
+            "latency_ms": result.latency_ms,
+        }
+        if result.runtime != "rules" and not result.error:
+            valid = sum(a.status != "invalid" and a.tool in TOOL_MODELS for a in executor.actions)
+            validity = scoring.tool_call_validity(proposed, valid)
+            scores["tool_call_validity"] = validity
+            scores["within_iteration_cap"] = result.within_iteration_cap
+            if validity is not None:
+                scores["agent_score"] = scoring.agent_score(validity, rejections, result.within_iteration_cap, weights=settings.score_weights)
+            if result.tokens:
+                scores["tokens_in"], scores["tokens_out"] = result.tokens["in"], result.tokens["out"]
+        scoring.record_scores(scan_id, scores, prompt_version=PROMPT_VERSION, extra={"runtime": result.runtime})
+        if approved:
+            scoring.update_pipeline_review(scan_id, {fid: "approve" for fid in approved}, prompt_version=inspect_prompt_version())
+    except Exception:
+        logger.exception("Could not record scores")
 
 
 def _fresh_guard(scan: ScanResult, approved: list[str], settings) -> Guard:

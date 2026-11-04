@@ -71,6 +71,11 @@ describe("read calls and links", () => {
 });
 
 describe("api.rejectFinding", () => {
+  it("reads the score cards from GET /scores", async () => {
+    const fetchMock = stubFetch(new Response(JSON.stringify({ agent_score: { value: null, n: 0, label: "n/a (0 so far)" } })));
+    await expect(api.scores()).resolves.toMatchObject({ agent_score: { n: 0 } });
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_URL}/scores`);
+  });
   it("posts a reject verdict for the finding as JSON", async () => {
     const fetchMock = stubFetch(new Response("{}"));
     await api.rejectFinding("abc", "dmg_box_1", "shadow");
