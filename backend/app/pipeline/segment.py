@@ -22,6 +22,7 @@ from app.schemas import BBox
 logger = logging.getLogger(__name__)
 
 BOX_CONCEPT = "cardboard box"
+PERSON_CONCEPT = "person"
 
 
 def concepts() -> dict[str, str]:

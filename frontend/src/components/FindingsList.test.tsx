@@ -89,6 +89,26 @@ describe("FindingsList", () => {
     expect(screen.getByText("Confidence is below 60%.")).toBeDefined();
   });
 
+  it("rejects a finding: reports it, excludes it from the approval and locks its checkbox", () => {
+    const onReject = vi.fn();
+    const onApprove = setup({ onReject });
+    const first = makeScan().findings[0];
+    fireEvent.click(screen.getAllByRole("button", { name: /Reject: not a real issue/ })[0]);
+    expect(onReject).toHaveBeenCalledExactlyOnceWith(first.id);
+    expect(screen.getByText(/Rejected: not a real issue/)).toBeDefined();
+    expect((screen.getByLabelText(new RegExp(`Include .* ${first.id}`)) as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    expect(onApprove.mock.calls[0][0]).not.toContain(first.id);
+  });
+
+  it("offers no reject button when rejection is not wired up, and disables it while locked", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: /Reject/ })).toBeNull();
+    cleanup();
+    setup({ onReject: vi.fn(), disabled: true });
+    for (const b of screen.getAllByRole("button", { name: /Reject/ })) expect((b as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("says so when there is nothing to approve", () => {
     setup({ findings: [] });
     expect(screen.getByText("No damage or blocked walkways found.")).toBeDefined();

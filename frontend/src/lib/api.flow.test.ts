@@ -70,6 +70,17 @@ describe("read calls and links", () => {
   });
 });
 
+describe("api.rejectFinding", () => {
+  it("posts a reject verdict for the finding as JSON", async () => {
+    const fetchMock = stubFetch(new Response("{}"));
+    await api.rejectFinding("abc", "dmg_box_1", "shadow");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${API_URL}/scan/abc/feedback`);
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ finding_id: "dmg_box_1", action: "reject", reason: "shadow" });
+  });
+});
+
 describe("demo photos", () => {
   it("lists demos and downloads one as a JPEG file named after it", async () => {
     stubFetch(new Response(JSON.stringify([{ id: "a" }])));

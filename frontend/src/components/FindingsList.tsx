@@ -12,13 +12,15 @@ interface Props {
   disabled: boolean;
   defaultSku?: string;
   onApprove: (findingIds: string[], skus: Record<string, string>) => void;
+  onReject?: (findingId: string) => void;
 }
 
 const SEVERITY_STYLE = { low: "text-zinc-300", medium: "text-hazard", high: "text-danger" } as const;
 const TYPE_LABEL = { box_damage: "Damaged box", walkway_blocked: "Blocked walkway" } as const;
 
-export function FindingsList({ findings, inventory, pending, disabled, defaultSku, onApprove }: Props) {
+export function FindingsList({ findings, inventory, pending, disabled, defaultSku, onApprove, onReject }: Props) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [rejected, setRejected] = useState<Set<string>>(new Set());
   const [skus, setSkus] = useState<Record<string, string>>(() =>
     defaultSku ? Object.fromEntries(findings.filter((f) => f.type === "box_damage").map((f) => [f.id, defaultSku])) : {},
   );
@@ -33,6 +35,12 @@ export function FindingsList({ findings, inventory, pending, disabled, defaultSk
       else next.add(id);
       return next;
     });
+  }
+
+  function reject(id: string) {
+    setRejected((prev) => new Set(prev).add(id));
+    setExcluded((prev) => new Set(prev).add(id));
+    onReject?.(id);
   }
 
   function submit() {
@@ -61,7 +69,7 @@ export function FindingsList({ findings, inventory, pending, disabled, defaultSk
                   type="checkbox"
                   className="mt-1 h-5 w-5 accent-yellow-400"
                   checked={!off}
-                  disabled={locked}
+                  disabled={locked || rejected.has(f.id)}
                   onChange={() => toggle(f.id)}
                   aria-label={`Include ${TYPE_LABEL[f.type]} ${f.id}`}
                 />
@@ -80,6 +88,22 @@ export function FindingsList({ findings, inventory, pending, disabled, defaultSk
                   {f.needs_review && f.review_reason && <span className="text-xs text-hazard">{f.review_reason}</span>}
                 </span>
               </label>
+              {onReject && (
+                <div className="mt-2 pl-8 text-xs">
+                  {rejected.has(f.id) ? (
+                    <span className="text-zinc-400">Rejected: not a real issue. Thanks for the feedback.</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={() => reject(f.id)}
+                      className="min-h-11 rounded border border-panel-border px-3 text-zinc-300 disabled:opacity-50"
+                    >
+                      Reject: not a real issue
+                    </button>
+                  )}
+                </div>
+              )}
               {f.type === "box_damage" && !off && (
                 <label className="mt-2 flex flex-col gap-1 pl-8 text-xs text-zinc-400">
                   SKU of the damaged box (optional, needed to quarantine stock)

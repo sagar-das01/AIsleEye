@@ -37,6 +37,8 @@ export interface ScanResult {
   findings: Finding[];
   timings_ms: Record<string, number>;
   replay?: boolean;
+  privacy?: "off" | "blurred" | "failed";
+  uninspected_boxes?: string[];
 }
 
 export type ActionStatus = "executed" | "rejected" | "invalid" | "failed";
@@ -129,6 +131,12 @@ export const api = {
   tickets: () => request<Ticket[]>("/tickets"),
   inventory: () => request<Inventory>("/inventory"),
   demos: () => request<DemoPhoto[]>("/demo"),
+  rejectFinding: (scanId: string, findingId: string, reason = "") =>
+    request<Record<string, unknown>>(`/scan/${scanId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finding_id: findingId, action: "reject", reason }),
+    }),
   demoPhoto: async (demo: Pick<DemoPhoto, "id" | "image_url">): Promise<File> => {
     const res = await fetch(`${API_URL}${demo.image_url}`, { cache: "no-store" });
     if (!res.ok) throw new ApiError(`GET ${demo.image_url} failed: ${res.status}`, res.status);

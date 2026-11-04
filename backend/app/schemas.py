@@ -23,6 +23,8 @@ class Finding(BaseModel):
     bbox: BBox
     description: str
     sku: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
 
 
 class DetectedObject(BaseModel):
@@ -52,4 +54,8 @@ class ScanResult(BaseModel):
     objects: list[DetectedObject]
     findings: list[Finding]
     timings_ms: dict[str, int]
+    privacy: Literal["off", "blurred", "failed"] = Field(
+        default="off", description="Whether people were blurred before boxes were sent for inspection."
+    )
+    uninspected_boxes: list[str] = Field(default_factory=list, description="Boxes the inspection returned no assessment for.")
     replay: bool = Field(default=False, description="True when served from saved demo results instead of a live analysis.")

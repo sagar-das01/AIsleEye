@@ -15,3 +15,5 @@ backend/data/compliance_log.json
 backend/data/audit_log.jsonl
 backend/data/tickets/
 backend/data/approvals/
+datasets/
+backend/data/feedback.jsonl
