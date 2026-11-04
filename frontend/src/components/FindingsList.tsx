@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Finding, Inventory } from "@/lib/api";
+import type { Finding, FindingDetails, Inventory } from "@/lib/api";
 import { SEVERITY_ICON } from "@/lib/scan";
 
 interface Props {
@@ -11,16 +11,19 @@ interface Props {
   pending: boolean;
   disabled: boolean;
   defaultSku?: string;
-  onApprove: (findingIds: string[], skus: Record<string, string>) => void;
+  onApprove: (findingIds: string[], skus: Record<string, string>, details: Record<string, FindingDetails>) => void;
   onReject?: (findingId: string) => void;
 }
 
 const SEVERITY_STYLE = { low: "text-zinc-300", medium: "text-hazard", high: "text-danger" } as const;
 const TYPE_LABEL = { box_damage: "Damaged box", walkway_blocked: "Blocked walkway" } as const;
+// Must match the guard: one detected damaged box moves exactly one unit to quarantine.
+const UNITS_PER_DAMAGED_BOX = 1;
 
 export function FindingsList({ findings, inventory, pending, disabled, defaultSku, onApprove, onReject }: Props) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [rejected, setRejected] = useState<Set<string>>(new Set());
+  const [details, setDetails] = useState<Record<string, FindingDetails>>({});
   const [skus, setSkus] = useState<Record<string, string>>(() =>
     defaultSku ? Object.fromEntries(findings.filter((f) => f.type === "box_damage").map((f) => [f.id, defaultSku])) : {},
   );
@@ -50,15 +53,27 @@ export function FindingsList({ findings, inventory, pending, disabled, defaultSk
       const sku = skus[f.id]?.trim();
       if (f.type === "box_damage" && sku) chosen[f.id] = sku;
     }
-    onApprove(selected.map((f) => f.id), chosen);
+    const context: Record<string, FindingDetails> = {};
+    for (const f of selected) {
+      const location = details[f.id]?.location?.trim();
+      const instructions = details[f.id]?.instructions?.trim();
+      if (location || instructions) context[f.id] = { location: location || undefined, instructions: instructions || undefined };
+    }
+    onApprove(selected.map((f) => f.id), chosen, context);
   }
 
   if (findings.length === 0) {
     return <p className="mt-3 text-sm text-zinc-400">No damage or blocked walkways found.</p>;
   }
 
+  const setDetail = (id: string, key: keyof FindingDetails, value: string) =>
+    setDetails((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
+
   return (
     <div className="mt-3 flex flex-col gap-3">
+      <p className="text-xs text-zinc-400">
+        🤖 AI-proposed findings. Nothing is dispatched until you approve; rejections are saved as review feedback.
+      </p>
       <ul className="flex flex-col gap-3">
         {findings.map((f) => {
           const off = excluded.has(f.id);
@@ -116,6 +131,37 @@ export function FindingsList({ findings, inventory, pending, disabled, defaultSk
                     onChange={(e) => setSkus((prev) => ({ ...prev, [f.id]: e.target.value }))}
                   />
                 </label>
+              )}
+              {f.type === "box_damage" && !off && inventory[skus[f.id]?.trim() ?? ""] && (
+                <p className="mt-2 pl-8 text-xs text-zinc-300" aria-label={`Stock preview for ${f.id}`}>
+                  On approval: {skus[f.id].trim()} −{UNITS_PER_DAMAGED_BOX} available ({inventory[skus[f.id].trim()].available} →{" "}
+                  {Math.max(0, inventory[skus[f.id].trim()].available - UNITS_PER_DAMAGED_BOX)}), +{UNITS_PER_DAMAGED_BOX} quarantine
+                </p>
+              )}
+              {!off && (
+                <details className="mt-2 pl-8 text-xs text-zinc-400">
+                  <summary className="min-h-11 cursor-pointer py-3">Location and instructions for the technician (optional)</summary>
+                  <label className="flex flex-col gap-1">
+                    Location (aisle, zone, rack)
+                    <input
+                      className="min-h-11 rounded border border-panel-border bg-background px-3 text-sm text-foreground"
+                      value={details[f.id]?.location ?? ""}
+                      maxLength={300}
+                      disabled={locked}
+                      onChange={(e) => setDetail(f.id, "location", e.target.value)}
+                    />
+                  </label>
+                  <label className="mt-2 flex flex-col gap-1">
+                    Instructions
+                    <textarea
+                      className="min-h-11 rounded border border-panel-border bg-background px-3 py-2 text-sm text-foreground"
+                      value={details[f.id]?.instructions ?? ""}
+                      maxLength={1000}
+                      disabled={locked}
+                      onChange={(e) => setDetail(f.id, "instructions", e.target.value)}
+                    />
+                  </label>
+                </details>
               )}
             </li>
           );

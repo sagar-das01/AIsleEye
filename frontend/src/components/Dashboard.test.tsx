@@ -32,6 +32,9 @@ beforeEach(() => {
   scores = vi.spyOn(api, "scores").mockResolvedValue(NO_SCORES);
   vi.spyOn(api, "inventory").mockResolvedValue({ "SKU-1042": { available: 5, quarantine: 3 }, "SKU-2": { available: 1, quarantine: 2 } });
   vi.spyOn(api, "demos").mockResolvedValue([]);
+  vi.spyOn(api, "shelfCount").mockResolvedValue({
+    scan_id: "0123456789abcdef", boxes: 3, damaged: 1, counted: 2, exclude_damaged: true, low_confidence: 0, needs_review: false,
+  });
   vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "" });
 });
 
@@ -228,7 +231,7 @@ describe("Dashboard: approving", () => {
     fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "SKU-1042" } });
     fireEvent.click(screen.getByRole("button", { name: "Approve & Dispatch (2)" }));
 
-    expect(approve).toHaveBeenCalledWith("0123456789abcdef", ["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" });
+    expect(approve).toHaveBeenCalledWith("0123456789abcdef", ["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" }, {});
     expect(screen.getByText("Agent dispatching…")).toBeDefined();
     expect((screen.getByRole("button", { name: "Dispatching…" }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -266,7 +269,7 @@ describe("Dashboard: approving", () => {
     expect((screen.getByRole("button", { name: /Approve & Dispatch/ }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("Create incident ticket");
-    expect(approve).toHaveBeenLastCalledWith("0123456789abcdef", ["dmg_box_0"], {});
+    expect(approve).toHaveBeenLastCalledWith("0123456789abcdef", ["dmg_box_0"], {}, {});
     expect(approve).toHaveBeenCalledTimes(2);
   });
 });

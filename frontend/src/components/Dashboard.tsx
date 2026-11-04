@@ -7,14 +7,27 @@ import { DemoGallery } from "@/components/DemoGallery";
 import { FindingsList } from "@/components/FindingsList";
 import { KpiStrip } from "@/components/KpiStrip";
 import { ScanOverlay } from "@/components/ScanOverlay";
+import { ShelfCountCard } from "@/components/ShelfCountCard";
 import { UploadPanel } from "@/components/UploadPanel";
-import { api, type ApproveResult, type DemoPhoto, type Inventory, type ScanResult, type Scores, type Ticket } from "@/lib/api";
+import {
+  api,
+  type ApproveResult,
+  type DemoPhoto,
+  type FindingDetails,
+  type Inventory,
+  type ScanResult,
+  type Scores,
+  type Ticket,
+} from "@/lib/api";
 import { describeError, type FriendlyError } from "@/lib/scan";
+import { useCan } from "@/lib/session";
 
 type Phase = "idle" | "scanning" | "scanned" | "approving" | "approved";
 
 interface Failure extends FriendlyError {
-  action?: { kind: "scan"; file: File; sku?: string } | { kind: "approve"; ids: string[]; skus: Record<string, string> };
+  action?:
+    | { kind: "scan"; file: File; sku?: string }
+    | { kind: "approve"; ids: string[]; skus: Record<string, string>; details: Record<string, FindingDetails> };
 }
 
 const STAGES: [number, string][] = [
@@ -23,7 +36,10 @@ const STAGES: [number, string][] = [
   [4000, "Inspecting boxes for damage…"],
 ];
 
-export function Dashboard() {
+const ACTIVE = new Set(["open", "in_progress"]);
+
+export function Dashboard({ onChanged }: { onChanged?: () => void } = {}) {
+  const can = useCan();
   const [phase, setPhase] = useState<Phase>("idle");
   const [stage, setStage] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -39,12 +55,22 @@ export function Dashboard() {
   const [suggestedSku, setSuggestedSku] = useState<string | undefined>();
   const busy = useRef(false);
 
+  const canTickets = can("tickets");
+  const canInventory = can("inventory");
+  const canScores = can("scores");
+
   const loadTotals = useCallback(async () => {
-    const [t, i, s] = await Promise.allSettled([api.tickets(), api.inventory(), api.scores()]);
+    // Only what this role may read, so a narrower role never fires requests it is denied.
+    const denied = () => Promise.reject(new Error("not permitted"));
+    const [t, i, s] = await Promise.allSettled([
+      canTickets ? api.tickets() : denied(),
+      canInventory ? api.inventory() : denied(),
+      canScores ? api.scores() : denied(),
+    ]);
     if (t.status === "fulfilled") setTickets(t.value);
     if (i.status === "fulfilled") setInventory(i.value);
     if (s.status === "fulfilled") setScores(s.value);
-  }, []);
+  }, [canTickets, canInventory, canScores]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch of the backend's totals
@@ -98,27 +124,28 @@ export function Dashboard() {
   );
 
   const runApprove = useCallback(
-    async (findingIds: string[], skus: Record<string, string>) => {
+    async (findingIds: string[], skus: Record<string, string>, details: Record<string, FindingDetails> = {}) => {
       if (busy.current || !scan) return;
       busy.current = true; // a ref, so a fast double click cannot send twice before the state updates
       setFailure(null);
       setPhase("approving");
       try {
-        setResult(await api.approve(scan.scan_id, findingIds, skus));
+        setResult(await api.approve(scan.scan_id, findingIds, skus, details));
         setPhase("approved");
         void loadTotals();
+        onChanged?.();
       } catch (error) {
         setPhase("scanned");
-        setFailure({ ...describeError(error), action: { kind: "approve", ids: findingIds, skus } });
+        setFailure({ ...describeError(error), action: { kind: "approve", ids: findingIds, skus, details } });
       } finally {
         busy.current = false;
       }
     },
-    [scan, loadTotals],
+    [scan, loadTotals, onChanged],
   );
 
   const retry = (action: NonNullable<Failure["action"]>) =>
-    void (action.kind === "scan" ? runScan(action.file, action.sku) : runApprove(action.ids, action.skus));
+    void (action.kind === "scan" ? runScan(action.file, action.sku) : runApprove(action.ids, action.skus, action.details));
 
   const replaying = demoMode === "replay" || scan?.replay === true;
   const boxes = scan?.objects.filter((o) => o.label === "box").length ?? 0;
@@ -130,7 +157,7 @@ export function Dashboard() {
       <KpiStrip
         items={[
           { label: "Scans this session", value: scans },
-          { label: "Open tickets", value: tickets.filter((t) => t.status === "open").length },
+          { label: "Open tickets", value: tickets.filter((t) => ACTIVE.has(t.status)).length },
           { label: "Units quarantined", value: quarantined },
           { label: "Walkway hazards", value: hazards },
           { label: "Pipeline agreement", value: scores?.pipeline_agreement.label ?? "n/a" },
@@ -204,14 +231,30 @@ export function Dashboard() {
                 inventory={inventory}
                 defaultSku={suggestedSku}
                 pending={phase === "approving"}
-                disabled={phase === "approved" || phase === "scanning"}
-                onApprove={(ids, skus) => void runApprove(ids, skus)}
-                onReject={(id) => void api.rejectFinding(scan.scan_id, id).then(loadTotals, () => undefined)}
+                disabled={phase === "approved" || phase === "scanning" || !can("approve")}
+                onApprove={(ids, skus, details) => void runApprove(ids, skus, details)}
+                onReject={
+                  can("review") ? (id) => void api.rejectFinding(scan.scan_id, id).then(loadTotals, () => undefined) : undefined
+                }
               />
             ) : (
               <p className="mt-3 text-sm text-zinc-500">No scan yet.</p>
             )}
           </section>
+
+          {scan && canInventory && (
+            <ShelfCountCard
+              key={scan.scan_id}
+              scanId={scan.scan_id}
+              inventory={inventory}
+              defaultSku={suggestedSku}
+              canReconcile={can("reconcile")}
+              onReconciled={() => {
+                void loadTotals();
+                onChanged?.();
+              }}
+            />
+          )}
 
           <section aria-labelledby="actions-title" className="rounded-lg border border-panel-border bg-panel p-4">
             <h2 id="actions-title" className="text-xs uppercase tracking-widest text-zinc-500">

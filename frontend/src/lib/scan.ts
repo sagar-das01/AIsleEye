@@ -29,6 +29,15 @@ export interface FriendlyError {
 
 export function describeError(error: unknown): FriendlyError {
   if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return { message: "Your session has ended. Sign in again to continue.", retryable: false };
+    }
+    if (error.status === 403) {
+      return { message: error.detail ?? "Your role does not allow this action.", retryable: false };
+    }
+    if (error.status === 409) {
+      return { message: error.detail ?? "This changed since you loaded it. Refresh and try again.", retryable: false };
+    }
     if (error.status === 504) {
       return { message: "The analysis took too long. Please try again, or use a smaller photo.", retryable: true };
     }

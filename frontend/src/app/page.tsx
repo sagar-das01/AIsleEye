@@ -1,5 +1,8 @@
+"use client";
+
+import { AuthGate } from "@/components/AuthGate";
 import { BackendStatus } from "@/components/BackendStatus";
-import { Dashboard } from "@/components/Dashboard";
+import { Workspace } from "@/components/Workspace";
 
 export default function Home() {
   return (
@@ -14,7 +17,9 @@ export default function Home() {
         </div>
         <BackendStatus />
       </header>
-      <Dashboard />
+      <AuthGate>
+        <Workspace />
+      </AuthGate>
     </div>
   );
 }
