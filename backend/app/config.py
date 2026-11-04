@@ -46,6 +46,8 @@ class Settings(BaseSettings):
 
     agent_runtime: Literal["langchain", "plain", "rules"] = "langchain"
     demo_mode: Literal["", "replay"] = ""
+    # Local demos only: scripts/demo.sh sets it for its own session; never put it in a shared .env.
+    demo_auth_bypass: bool = False
     privacy_blur: bool = True
     review_confidence: float = Field(0.6, ge=0.0, le=1.0)
     cache_ttl_days: int = Field(7, ge=1)

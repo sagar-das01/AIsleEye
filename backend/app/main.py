@@ -31,6 +31,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     retention.purge_expired(scan_pipeline.CACHE_DIR, get_settings().cache_ttl_days)
+    if get_settings().demo_auth_bypass:
+        logger.warning("DEMO_AUTH_BYPASS is on: direct loopback requests without a token are admin. Local demos only.")
     observability.init()
     yield
     observability.shutdown()
@@ -55,6 +57,7 @@ def health() -> dict:
         "status": "ok",
         "models": {"vision_agent": settings.muse_model, "segmentation": settings.sam_model},
         "demo_mode": get_settings().demo_mode,
+        "auth_bypass": get_settings().demo_auth_bypass,
     }
 
 
