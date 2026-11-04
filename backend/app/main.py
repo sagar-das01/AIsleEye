@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.pipeline.scan import ALLOWED_MIME_TYPES, InvalidImageError, load_cached, run_scan
+from app.routes_agent import router as agent_router
 from app.schemas import ScanResult
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(agent_router)
 
 
 @app.get("/health")

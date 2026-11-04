@@ -10,3 +10,8 @@ backend/data/cache/
 htmlcov/
 
 infra/langfuse/.env
+backend/data/inventory.json
+backend/data/compliance_log.json
+backend/data/audit_log.jsonl
+backend/data/tickets/
+backend/data/approvals/

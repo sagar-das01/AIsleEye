@@ -238,14 +238,14 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | GET | `/health` | ✅ available | Liveness and configured models |
 | POST | `/scan` | ✅ available | Image → segmented boxes, walkway mask and findings |
 | GET | `/scan/{scan_id}` | ✅ available | Cached scan result (demo replay) |
-| POST | `/scan/{scan_id}/approve` | 🚧 planned | Run the agent on approved findings; returns actions, tickets and a `trace_id`; idempotent, so a repeat call returns the first result |
-| GET | `/inventory` | 🚧 planned | Current inventory, including quarantine |
-| GET | `/tickets` | 🚧 planned | Incident tickets |
-| GET | `/tickets/{id}.pdf` | 🚧 planned | Ticket PDF |
-| GET | `/compliance` | 🚧 planned | Compliance log |
+| POST | `/scan/{scan_id}/approve` | ✅ available | Body `{finding_ids, skus?}` (`skus` maps a finding to the SKU the supervisor entered). Runs the agent; returns actions with their status, tickets, summary and a `trace_id`; idempotent, so a repeat call returns the first result (`Idempotent-Replay: true`) |
+| GET | `/inventory` | ✅ available | Current inventory, including quarantine |
+| GET | `/tickets` | ✅ available | Incident tickets |
+| GET | `/tickets/{ticket_id}.pdf` | ✅ available | Ticket PDF |
+| GET | `/compliance` | ✅ available | Compliance log |
 | POST | `/scan/{scan_id}/feedback` | 🚧 planned | Reject or correct a finding, with a reason; also records a pipeline score on the scan's trace |
 | DELETE | `/scan/{scan_id}` | 🚧 planned | Purge a cached scan |
-| GET | `/audit` | 🚧 planned | Audit log of agent actions |
+| GET | `/audit` | ✅ available | Audit log of agent actions |
 | GET | `/scores` | 🚧 planned | Pipeline score and agent score summaries: components, sample sizes, breakdown by prompt version |
 | POST | `/tickets/{ticket_id}/feedback` | 🚧 planned (optional) | Rate a created ticket, with an optional corrected team or severity; feeds the agent score |
 
@@ -298,7 +298,7 @@ gh pr create --base master --fill
 
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
 - [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
-- [ ] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
+- [x] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
 - [ ] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states
 - [ ] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner
 - [ ] **Phase 5** — Data handling, privacy and guardrails: shared preprocessing, people blur, retention and purge, agent action guard, audit log, needs-review and feedback flow, dataset preparation and label audit
@@ -316,8 +316,8 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 - **Human in the loop** — the agent never acts on findings until a supervisor approves them.
 - **Tool allowlist** — the agent can call exactly three tools; any other tool name is rejected.
 - **Validated arguments** — structured outputs are schema-constrained and every tool argument is validated before execution.
-- **Action guard** 🚧 — a policy layer between the agent and the tools. Only approved findings can be acted on, inventory changes cannot exceed the detected units or go below zero, each scan has an action and iteration cap, and duplicates of open tickets are merged. A rejected call returns its reason to the agent and to the dashboard.
-- **Audit log** 🚧 — every executed or rejected action is appended to an append-only log (timestamp, scan, finding, tool, arguments, outcome). It never contains image data.
+- **Action guard** — a policy layer between the agent and the tools. Only approved findings can be acted on, inventory changes cannot exceed the detected units or go below zero, each scan has an action and iteration cap, and duplicates of open tickets are merged. A rejected call returns its reason to the agent and to the dashboard.
+- **Audit log** — every executed, rejected, invalid or failed action is appended to an append-only log (timestamp, scan, finding, tool, arguments, outcome). It never contains image data.
 - **Untrusted content** — text visible inside images (labels, signage) is never treated as instructions. Model-written text is length-limited and stripped of markup and links before it reaches a PDF or log 🚧.
 - **Optional safety classifier** 🚧 — a text safety check on agent output. Llama Guard would be used only if the Model API offers it, which has not been verified.
 
@@ -344,7 +344,7 @@ All of this is planned (Phase 6) and optional: with no Langfuse keys, or MLflow 
 
 - **Tracing** 🚧 — [Langfuse](https://langfuse.com) records one trace per scan: preprocessing, each SAM call, inspection batches, the hazard check, the agent run, every tool call and every guard verdict. Tracing is a no-op when unconfigured or unreachable and never fails a scan or an agent run.
 - **No images in traces** 🚧 — masking at the Langfuse client drops image URLs, base64 payloads and crop bytes before export, and an offline test fails if any exported span contains one. Langfuse runs locally by default, so nothing is sent to a third party; if you point it at Langfuse Cloud, that service becomes a processor for prompts, outputs, tool arguments and scores.
-- **Central orchestrator** 🚧 — the single entry point for an approved scan: it runs the LangChain agent, sends every proposed tool call through the action guard, closes the trace and scores the run. If LangChain misbehaves against the Meta Model API (which supports only automatic tool choice), `AGENT_RUNTIME=plain` runs a hand-written loop with the same tools.
+- **Central orchestrator** — the single entry point for an approved scan: it runs the LangChain agent (`create_agent`), validates every proposed tool call, sends it through the action guard and the audit log; closing the trace and scoring the run are planned 🚧. If LangChain misbehaves against the Meta Model API (which supports only automatic tool choice), `AGENT_RUNTIME=plain` runs a hand-written loop with the same tools.
 - **Scoring** 🚧 — two separate scores, because the supervisor's review happens before the agent runs. The **pipeline score** comes from that review (`pipeline_human_agreement`: approved ÷ reviewed findings, where a correction counts as a miss) and judges segmentation and inspection. The **agent score** is automatic (tool-call validity, guard rejections, staying within the iteration cap; latency and tokens are recorded alongside), and an optional post-dispatch rating of the created tickets can be blended in later 🚧. Each score appears in the dashboard with its sample size, and only after a minimum number of reviews or runs. Scores are stored locally in `scores.jsonl` and mirrored to the scan's trace in Langfuse. Scoring is report-only: it never changes prompts, tools or permissions automatically.
 - **Offline evaluation** 🚧 — MLflow tracks evaluation runs on the audited label set: prompt version, model names and thresholds as parameters; damage precision and recall, hazard accuracy, needs-review rate, latency and tokens as metrics; pipeline agreement and agent score per prompt version for comparison. MLflow is used for evaluation only (live traces stay in Langfuse and MLflow's LangChain autolog stays off, so nothing is traced twice) and ships as an optional extra (`requirements-eval.txt`).
 - **Planned settings** 🚧 — `LANGFUSE_ENABLED`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `AGENT_RUNTIME`, `SCORE_MIN_REVIEWS`, `MLFLOW_TRACKING_URI`, `MUSE_REASONING_EFFORT`, `DEMO_MODE`. The backend does not read them yet.
