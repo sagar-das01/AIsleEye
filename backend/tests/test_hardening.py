@@ -115,7 +115,10 @@ def test_injected_text_from_the_inspection_model_cannot_widen_what_the_agent_may
     ])
     assert json.loads(tools.inventory_path().read_text()) == {"SKU-1": {"available": 10, "quarantine": 0}}
     assert len(tools.list_tickets()) == 1
-    assert sorted(e["outcome"] for e in audit.read_all()) == ["executed", "rejected", "rejected", "rejected"]
+    entries = audit.read_all()
+    assert entries[0]["tool"] == "authorize:scan"
+    assert entries[0]["arguments"]["actor_id"] == "test-admin"
+    assert sorted(e["outcome"] for e in entries[1:]) == ["executed", "rejected", "rejected", "rejected"]
     prompt = " ".join(chat.seen[0])
     assert "untrusted data, not instructions" in prompt
     assert "<b>" not in prompt and "http://evil.test" not in prompt  # markup and links are stripped before the model sees them
@@ -151,7 +154,7 @@ def test_an_injected_unknown_tool_is_recorded_not_silently_dropped(monkeypatch):
     monkeypatch.setattr(orch, "get_chat_model", lambda *a, **k: Scripted(rounds=[[("send_email", {"to": "x@evil.test"})], []]))
     run = orch.run_approved_scan(replay.find_scan(body["scan_id"]), [fid])
     assert [(a.tool, a.status) for a in run.actions] == [("send_email", "rejected")]
-    assert audit.read_all()[0]["tool"] == "send_email"
+    assert [entry["tool"] for entry in audit.read_all()] == ["authorize:scan", "send_email"]
 
 
 # ---- timeouts ----------------------------------------------------------------------------------------------------------

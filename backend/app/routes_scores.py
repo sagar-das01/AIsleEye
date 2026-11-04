@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app import scoring
 from app.config import get_settings
+from app.auth import Permission, require_permission
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_permission(Permission.SCORES))])
 
 
 @router.get("/scores")

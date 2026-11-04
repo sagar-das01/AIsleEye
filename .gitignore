@@ -15,6 +15,7 @@ backend/data/compliance_log.json
 backend/data/audit_log.jsonl
 backend/data/tickets/
 backend/data/approvals/
+backend/data/access.json
 datasets/
 backend/data/feedback.jsonl
 backend/data/mlflow/

@@ -46,3 +46,20 @@ def _isolated_scores(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(scoring, "SCORES_PATH", tmp_path_factory.mktemp("scores") / "scores.jsonl")
     yield
     observability.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_api(request, monkeypatch, tmp_path):
+    from app import audit
+    from app.auth import Grant, Role, User, current_user
+    from app.main import app
+
+    monkeypatch.setattr(audit, "AUDIT_PATH", tmp_path / "audit_log.jsonl")
+    if not LIVE and request.node.get_closest_marker("rbac") is None:
+        # Existing pipeline tests exercise their original behavior behind an explicit test-only identity.
+        monkeypatch.setitem(
+            app.dependency_overrides, current_user,
+            lambda: User(subject="test-admin", display_name="Test admin", grants=[
+                Grant(role=Role.ADMIN, warehouse_id="default"),
+            ]),
+        )

@@ -3,12 +3,13 @@ import logging
 import threading
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import audit, replay
 from app.agent import orchestrator, tools
+from app.auth import Permission, TicketReader, can_view_ticket, require_permission
 from app.storage import read_json, write_json
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ def _approval_key(scan_id: str, finding_ids: list[str]) -> str:
     return hashlib.sha256(f"{scan_id}|{','.join(sorted(set(finding_ids)))}".encode()).hexdigest()[:32]
 
 
-@router.post("/scan/{scan_id}/approve")
+@router.post("/scan/{scan_id}/approve", dependencies=[Depends(require_permission(Permission.APPROVE))])
 def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Response) -> dict:
     scan = replay.find_scan(scan_id)
     if scan is None:
@@ -58,29 +59,35 @@ def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Re
         return payload
 
 
-@router.get("/inventory")
+@router.get("/inventory", dependencies=[Depends(require_permission(Permission.INVENTORY))])
 def inventory() -> dict:
     return tools.read_inventory()
 
 
 @router.get("/tickets")
-def tickets() -> list[dict]:
-    return [{**t, "pdf_url": f"/tickets/{t['ticket_id']}.pdf"} for t in tools.list_tickets()]
+def tickets(user: TicketReader) -> list[dict]:
+    return [
+        {**t, "pdf_url": f"/tickets/{t['ticket_id']}.pdf"}
+        for t in tools.list_tickets() if can_view_ticket(user, t)
+    ]
 
 
 @router.get("/tickets/{ticket_id}.pdf")
-def ticket_pdf(ticket_id: Annotated[str, TICKET_ID]) -> FileResponse:
+def ticket_pdf(ticket_id: Annotated[str, TICKET_ID], user: TicketReader) -> FileResponse:
+    ticket = next((t for t in tools.list_tickets() if t["ticket_id"] == ticket_id), None)
+    if ticket is None or not can_view_ticket(user, ticket):
+        raise HTTPException(404, "Ticket not found.")
     pdf = tools.tickets_dir() / f"{ticket_id}.pdf"
     if not pdf.is_file():
         raise HTTPException(404, "Ticket not found.")
     return FileResponse(pdf, media_type="application/pdf", filename=f"{ticket_id}.pdf")
 
 
-@router.get("/compliance")
+@router.get("/compliance", dependencies=[Depends(require_permission(Permission.COMPLIANCE))])
 def compliance() -> list[dict]:
     return tools.list_compliance()
 
 
-@router.get("/audit")
+@router.get("/audit", dependencies=[Depends(require_permission(Permission.AUDIT))])
 def audit_log() -> list[dict]:
     return audit.read_all()
