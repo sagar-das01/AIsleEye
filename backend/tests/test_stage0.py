@@ -165,7 +165,8 @@ def test_langchain_agent_check_fails_without_a_final_answer(monkeypatch):
 
 def test_langfuse_check_is_skipped_when_not_configured(monkeypatch):
     for var in ("LANGFUSE_ENABLED", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
-        monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(var, "")  # an empty real env var beats any value in the local .env file
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
     smoke_test.get_settings.cache_clear()
     try:
         with pytest.raises(smoke_test.Skip):

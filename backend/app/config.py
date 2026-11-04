@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     langfuse_enabled: bool = False
     langfuse_public_key: str = ""
     langfuse_secret_key: SecretStr = SecretStr("")
-    langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_base_url: str = "http://localhost:3000"
     score_min_reviews: int = Field(5, ge=1)
     score_weights: dict[str, float] = {"validity": 0.4, "guard_clean": 0.4, "within_cap": 0.2}
     mlflow_tracking_uri: str = "sqlite:///data/mlflow/mlflow.db"
