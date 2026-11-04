@@ -16,7 +16,8 @@ def readme_routes() -> list[tuple[str, str, bool]]:
 
 
 def real_routes() -> set[tuple[str, str]]:
-    return {(m, r.path) for r in app.routes if hasattr(r, "methods") for m in r.methods}
+    # openapi() sees routes added through include_router, which app.routes hides behind wrapper objects
+    return {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
 
 
 def test_readme_documents_an_api_table():

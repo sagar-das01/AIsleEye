@@ -73,7 +73,7 @@ def test_feedback_endpoint_validates_and_404s_unknown_scans(tmp_path, monkeypatc
     from fastapi.testclient import TestClient
 
     main = need("app.main", "app")
-    if not any(getattr(r, "path", "") == "/scan/{scan_id}/feedback" for r in main.app.routes):
+    if "post" not in main.app.openapi()["paths"].get("/scan/{scan_id}/feedback", {}):
         pytest.skip("POST /scan/{scan_id}/feedback is not implemented yet")
     client = TestClient(main.app)
     url = "/scan/0123456789abcdef/feedback"

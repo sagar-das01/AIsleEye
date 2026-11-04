@@ -76,7 +76,7 @@ def test_overlong_text_is_capped_not_rejected_and_not_unbounded(data_dir):
 
 @pytest.mark.parametrize(
     "dirty",
-    ["<script>alert(1)</script>", "[click](http://evil.test)", "visit http://evil.test now", "<img src=x onerror=alert(1)>", "<b>bold</b>"],
+    ["<script>alert(1)</script>", "[click](http://evil.test)", "visit http://evil.test now", "<img src=x onerror=alert(1)> photo", "<b>bold</b>"],
 )
 def test_model_written_text_is_sanitised_before_it_reaches_pdf_and_logs(dirty, data_dir):
     result = ticket(description=dirty)
@@ -166,3 +166,9 @@ def test_invalid_compliance_arguments_are_rejected(bad):
 def test_compliance_note_is_sanitised():
     result = tools.log_compliance_event("c", "l", "low", "<script>x</script> see http://evil.test")
     assert "<script" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("markup_only", ["<img src=x onerror=alert(1)>", "<b></b>", "http://evil.test", "[](http://evil.test)"])
+def test_text_that_is_only_markup_is_rejected_not_stored_blank(markup_only):
+    with pytest.raises(tools.ToolArgumentError, match="no usable text"):
+        ticket(description=markup_only)

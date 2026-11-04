@@ -15,7 +15,7 @@ main = need("app.main", "app")
 orch = need("app.agent.orchestrator", "run_approved_scan", "default_step")
 scan_mod = need("app.pipeline.scan", "CACHE_DIR")
 
-if not any(getattr(r, "path", "") == "/scan/{scan_id}/approve" for r in main.app.routes):
+if "post" not in main.app.openapi()["paths"].get("/scan/{scan_id}/approve", {}):
     pytest.skip("POST /scan/{scan_id}/approve is not implemented yet", allow_module_level=True)
 
 from app.schemas import BBox, Finding, ImageSize, ScanResult  # noqa: E402
@@ -27,7 +27,12 @@ client = TestClient(main.app)
 @pytest.fixture(autouse=True)
 def world(tmp_path, monkeypatch):
     import app.agent.tools as tools
+    import app.audit as audit
+    import app.config as config
 
+    monkeypatch.setenv("AGENT_RUNTIME", "plain")  # the scripted step below drives the hand-written loop
+    config.get_settings.cache_clear()
+    monkeypatch.setattr(audit, "AUDIT_PATH", tmp_path / "audit_log.jsonl")
     monkeypatch.setattr(scan_mod, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(tools, "DATA_DIR", tmp_path)
     (tmp_path / "inventory.json").write_text('{"SKU-1": {"available": 10, "quarantine": 0}}')
@@ -46,7 +51,9 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "default_step", lambda messages: [] if len(messages) > 2 else [
         orch.ToolCall("create_incident_ticket", dict(finding_id="dmg_box_1", title="t", severity="medium", assignee_team="Maintenance", description="d"))
     ])
-    return tmp_path
+    yield tmp_path
+    monkeypatch.undo()
+    config.get_settings.cache_clear()
 
 
 def approve(ids, scan_id=SCAN_ID):
@@ -114,15 +121,18 @@ def test_double_click_creates_exactly_one_ticket_and_one_inventory_change(world)
     assert len(list((world / "tickets").glob("*.pdf"))) == 1
 
 
-def test_a_failed_run_does_not_poison_the_idempotency_key(monkeypatch):
+def test_a_failed_run_does_not_poison_the_idempotency_key(world, monkeypatch):
+    working = orch.default_step
+
     def boom(messages):
         raise RuntimeError("model down")
 
     monkeypatch.setattr(orch, "default_step", boom)
-    approve(["dmg_box_1"])
-    monkeypatch.undo()
+    assert approve(["dmg_box_1"]).status_code == 502
+    monkeypatch.setattr(orch, "default_step", working)
     # After the outage a retry must be allowed to run for real.
-    assert approve(["dmg_box_1"]).status_code in (200, 502)
+    retry = approve(["dmg_box_1"])
+    assert retry.status_code == 200 and len(retry.json()["tickets"]) == 1
 
 
 # ---- read endpoints -------------------------------------------------------------------------------------------

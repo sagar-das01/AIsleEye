@@ -93,7 +93,7 @@ def test_symlinks_are_not_followed_out_of_the_cache(tmp_path):
 # ---- API ------------------------------------------------------------------------------------------------------
 
 def _delete_route_exists(main):
-    return any(getattr(r, "path", "") == "/scan/{scan_id}" and "DELETE" in getattr(r, "methods", ()) for r in main.app.routes)
+    return "delete" in main.app.openapi()["paths"].get("/scan/{scan_id}", {})
 
 
 @pytest.fixture
