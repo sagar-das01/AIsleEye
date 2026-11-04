@@ -56,6 +56,11 @@ def world(tmp_path, monkeypatch):
     config.get_settings.cache_clear()
 
 
+def dispatched(body):
+    """The dispatch itself; `already_dispatched` only says whether this response was the first or a replay."""
+    return {k: v for k, v in body.items() if k != "already_dispatched"}
+
+
 def approve(ids, scan_id=SCAN_ID):
     return client.post(f"/scan/{scan_id}/approve", json={"finding_ids": ids})
 
@@ -93,18 +98,18 @@ def test_unknown_finding_id_is_rejected_without_side_effects(world):
 def test_repeat_call_returns_the_first_result_and_creates_nothing_new(world):
     first = approve(["dmg_box_1"]).json()
     second = approve(["dmg_box_1"]).json()
-    assert second == first
+    assert dispatched(second) == dispatched(first) and second["already_dispatched"] is True
     assert len(list((world / "tickets").glob("*.pdf"))) == 1
 
 
 def test_finding_order_does_not_change_the_idempotency_key(world):
     a = approve(["dmg_box_1", "hz_box_2"]).json()
     b = approve(["hz_box_2", "dmg_box_1"]).json()
-    assert a == b
+    assert dispatched(a) == dispatched(b)
 
 
 def test_duplicate_ids_in_one_request_count_once(world):
-    assert approve(["dmg_box_1", "dmg_box_1"]).json() == approve(["dmg_box_1"]).json()
+    assert dispatched(approve(["dmg_box_1", "dmg_box_1"]).json()) == dispatched(approve(["dmg_box_1"]).json())
 
 
 def test_a_different_finding_set_is_a_new_run(world):
@@ -117,7 +122,8 @@ def test_double_click_creates_exactly_one_ticket_and_one_inventory_change(world)
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda _: approve(["dmg_box_1"]), range(8)))
     assert {r.status_code for r in results} == {200}
-    assert len({json.dumps(r.json(), sort_keys=True) for r in results}) == 1
+    assert len({json.dumps(dispatched(r.json()), sort_keys=True) for r in results}) == 1
+    assert sum(r.json()["already_dispatched"] is False for r in results) == 1
     assert len(list((world / "tickets").glob("*.pdf"))) == 1
 
 
@@ -132,7 +138,8 @@ def test_a_failed_run_does_not_poison_the_idempotency_key(world, monkeypatch):
     # With the model down the built-in rules dispatch, and that result is the stored one.
     assert first.status_code == 200 and first.json()["fallback"] == "rules" and len(first.json()["tickets"]) == 1
     monkeypatch.setattr(orch, "default_step", working)
-    assert approve(["dmg_box_1"]).json() == first.json()
+    again = approve(["dmg_box_1"]).json()
+    assert again["already_dispatched"] is True and again["actions"] == first.json()["actions"] and again["tickets"] == first.json()["tickets"]
 
 
 def test_a_run_that_fails_after_acting_is_a_502_and_is_not_stored(world, monkeypatch):

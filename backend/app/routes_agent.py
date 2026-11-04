@@ -1,12 +1,13 @@
 import hashlib
 import logging
 import threading
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from pydantic import BaseModel, Field
 
-from app import annotations, audit, observability, replay
+from app import annotations, audit, observability, replay, workflow
 from app.agent import orchestrator, tools
 from app.auth import Permission, User, require_permission
 from app.config import get_settings
@@ -41,6 +42,24 @@ class ReconcileRequest(BaseModel):
     confirm_needs_review: bool = False
 
 
+DOUBLE_CLICK_S = 60
+
+
+def _replayable(stored: dict, path) -> tuple[bool, list[dict]]:
+    """A stored approval is replayed only for a genuine repeat; it returns the tickets' current state, not a snapshot.
+
+    Repeat = a retry or double-click (within DOUBLE_CLICK_S), or its tickets are still active, where a new run would only
+    duplicate them. Once every ticket from it is resolved, approving the same findings again is a new incident.
+    """
+    current = {t["ticket_id"]: t for t in workflow.list_tickets()}
+    tickets = [{**t, **{k: current[t["ticket_id"]][k] for k in ("status", "assigned_to_user_id") if t["ticket_id"] in current}}
+               for t in stored.get("tickets", [])]
+    active = any(t.get("status") in workflow.ACTIVE_STATUSES for t in tickets)
+    approved_at = stored.get("approved_at") or datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
+    recent = (datetime.now(UTC) - datetime.fromisoformat(approved_at)).total_seconds() < DOUBLE_CLICK_S
+    return active or recent, tickets
+
+
 def _approval_key(scan_id: str, finding_ids: list[str]) -> str:
     return hashlib.sha256(f"{scan_id}|{','.join(sorted(set(finding_ids)))}".encode()).hexdigest()[:32]
 
@@ -63,18 +82,24 @@ def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Re
     path = tools.DATA_DIR / "approvals" / f"{key}.json"
     with _locks_guard:
         lock = _locks.setdefault(key, threading.Lock())
-    # One run per scan and finding set: a repeat or double-click gets the first result back.
+    # One run per scan and finding set while it is still in play: a repeat or double-click gets the first result back,
+    # clearly marked as already dispatched, instead of creating duplicate tickets.
     with lock:
         stored = read_json(path)
         if stored is not None:
-            response.headers["Idempotent-Replay"] = "true"
-            return stored
+            replay_it, tickets = _replayable(stored, path)
+            if replay_it:
+                response.headers["Idempotent-Replay"] = "true"
+                approved_at = stored.get("approved_at") or datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
+                return {**stored, "tickets": tickets, "already_dispatched": True, "approved_at": approved_at}
         details = {k: v.model_dump() for k, v in body.details.items() if k in body.finding_ids}
         run = orchestrator.run_approved_scan(scan, body.finding_ids, skus=body.skus, details=details)
         if run.error:
             raise HTTPException(502, "The agent service is unavailable. Please try again shortly.")
         payload = run.to_dict()
         payload["tickets"] = [a["result"] for a in payload["actions"] if a["tool"] == "create_incident_ticket" and a["status"] == "executed"]
+        payload["approved_at"] = datetime.now(UTC).isoformat()
+        payload["already_dispatched"] = False
         write_json(path, payload)
         annotations.mark_dispatched(scan_id, body.finding_ids)
         return payload

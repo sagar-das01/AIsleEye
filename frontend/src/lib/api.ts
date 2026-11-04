@@ -208,6 +208,9 @@ export interface ApproveResult {
   within_iteration_cap: boolean;
   summary: string | null;
   fallback?: string | null;
+  /** True when these findings were already dispatched and this is the earlier result, with current ticket status. */
+  already_dispatched?: boolean;
+  approved_at?: string;
 }
 
 export interface DemoPhoto {

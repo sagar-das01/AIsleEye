@@ -80,7 +80,7 @@ def test_reconcile_sets_available_once_and_audits(world):
     assert first.status_code == 200
     assert first.json()["available"] == 22 and first.json()["change"] == -3 and first.json()["previous_available"] == 25
     again = reconcile()
-    assert again.json() == first.json() and again.headers["Idempotent-Replay"] == "true"
+    assert again.json() == first.json() and again.headers["Idempotent-Replay"] == "true"  # reconcile replays are exact
     inv = tools.read_inventory()["SKU-1042"]
     assert inv == {"available": 22, "quarantine": 0, "reorder_point": 24}
     rows = {r["sku"]: r for r in client.get("/inventory/board").json()}

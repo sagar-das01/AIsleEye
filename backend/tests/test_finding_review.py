@@ -169,3 +169,52 @@ def test_input_is_validated_and_sanitized(world):
 def test_corrections_are_audited_as_authorized_actions(world):
     correct()
     assert any(e["tool"] == "authorize:review" for e in audit.read_all())
+
+
+def test_re_approving_while_tickets_are_active_replays_and_says_so(world):
+    first = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()
+    assert first["already_dispatched"] is False
+    again = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]})
+    assert again.headers["Idempotent-Replay"] == "true" and again.json()["already_dispatched"] is True
+    assert again.json()["approved_at"] == first["approved_at"] and len(workflow.list_tickets()) == 1
+
+
+def test_replays_show_the_tickets_current_status(world, monkeypatch):
+    from app import routes_agent
+
+    first = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()
+    ticket_id = first["tickets"][0]["ticket_id"]
+    monkeypatch.setattr(routes_agent, "DOUBLE_CLICK_S", 0)
+    store = json.loads(workflow.store_path().read_text())
+    store["tickets"][ticket_id].update(status="in_progress", assigned_to_user_id="tech-a")
+    workflow.store_path().write_text(json.dumps(store))
+    again = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()
+    assert again["already_dispatched"] is True
+    assert (again["tickets"][0]["status"], again["tickets"][0]["assigned_to_user_id"]) == ("in_progress", "tech-a")
+
+
+def test_once_its_tickets_are_resolved_the_same_findings_dispatch_a_new_incident(world, monkeypatch):
+    from app import routes_agent
+
+    first = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()
+    store = json.loads(workflow.store_path().read_text())
+    store["tickets"][first["tickets"][0]["ticket_id"]]["status"] = "resolved"
+    workflow.store_path().write_text(json.dumps(store))
+    # Within the double-click window it is still a replay...
+    assert client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()["already_dispatched"] is True
+    # ...after it, a resolved incident can be reported again.
+    monkeypatch.setattr(routes_agent, "DOUBLE_CLICK_S", 0)
+    second = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["dmg_box_0"]}).json()
+    assert second["already_dispatched"] is False and second["tickets"][0]["ticket_id"] != first["tickets"][0]["ticket_id"]
+    assert len(workflow.list_tickets()) == 2
+
+
+def test_legacy_stored_approvals_without_a_timestamp_still_work(world):
+    first = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["hz_box_1"]}).json()
+    path = next((world / "approvals").glob("*.json"))
+    stored = json.loads(path.read_text())
+    stored.pop("approved_at")
+    stored.pop("already_dispatched")
+    path.write_text(json.dumps(stored))
+    again = client.post(f"/scan/{SCAN_ID}/approve", json={"finding_ids": ["hz_box_1"]}).json()
+    assert again["already_dispatched"] is True and again["tickets"][0]["ticket_id"] == first["tickets"][0]["ticket_id"]

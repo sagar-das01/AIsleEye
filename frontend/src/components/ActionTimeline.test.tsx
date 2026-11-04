@@ -70,3 +70,26 @@ describe("ActionTimeline", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+describe("ActionTimeline: replayed approvals", () => {
+  it("says plainly that nothing new was created and shows the tickets' current status", () => {
+    render(
+      <ActionTimeline
+        result={makeApprove({
+          already_dispatched: true,
+          approved_at: "2026-11-05T00:50:00+05:30",
+          tickets: [{ ...makeApprove().tickets[0], status: "in_progress" }],
+        })}
+      />,
+    );
+    const notice = screen.getByRole("status", { name: "Already dispatched" });
+    expect(notice.textContent).toMatch(/already dispatched at [\s\S]*no new\s+tickets were created/);
+    expect(notice.textContent).toMatch(/T-abc123 · ◐ In progress/);
+  });
+
+  it("shows no notice for a fresh dispatch", () => {
+    render(<ActionTimeline result={makeApprove({ already_dispatched: false })} />);
+    expect(screen.queryByRole("status", { name: "Already dispatched" })).toBeNull();
+  });
+});
+

@@ -278,7 +278,8 @@ def test_approving_in_replay_mode_works_end_to_end_offline(world, replay_env, mo
     (world / "cache" / f"{scan.scan_id}.json").write_text(scan.model_dump_json())
     res = client.post(f"/scan/{scan.scan_id}/approve", json={"finding_ids": ["dmg_box_1", "hz_box_2"]})
     assert res.status_code == 200 and len(res.json()["tickets"]) == 2 and res.json()["fallback"] is None
-    assert client.post(f"/scan/{scan.scan_id}/approve", json={"finding_ids": ["hz_box_2", "dmg_box_1"]}).json() == res.json()
+    again = client.post(f"/scan/{scan.scan_id}/approve", json={"finding_ids": ["hz_box_2", "dmg_box_1"]}).json()
+    assert again["already_dispatched"] is True and again["tickets"] == res.json()["tickets"]
 
 
 def test_demo_photos_dispatch_correctly_from_their_pinned_results(world, monkeypatch):
