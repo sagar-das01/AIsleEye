@@ -15,6 +15,7 @@ from meta_sam_parser import (
     parse_responses_stream,
 )
 
+from app import observability
 from app.clients import get_async_client
 from app.config import get_settings
 from app.schemas import BBox
@@ -119,21 +120,28 @@ def records_to_segments(
 
 
 async def segment(image_data_url: str, concept: str, *, width: int, height: int, id_prefix: str = "obj") -> list[Segment]:
-    response = await get_async_client().responses.create(
-        model=get_settings().sam_model,
-        input=[{
-            "type": "message",
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": concept},
-                {"type": "input_image", "image_url": image_data_url},
-            ],
-        }],
-        metadata=SAM_METADATA,
-    )
-    result = await parse_sam_output(response.output_text or "")
-    # Mask decoding is pure Python; keep it off the event loop.
-    return await asyncio.to_thread(records_to_segments, result, width=width, height=height, id_prefix=id_prefix)
+    # Traces record the concept and the payload size, never the image.
+    with observability.span(
+        f"sam:{id_prefix}", as_type="generation", model=get_settings().sam_model,
+        input={"concept": concept, "image_chars": len(image_data_url)},
+    ) as obs:
+        response = await get_async_client().responses.create(
+            model=get_settings().sam_model,
+            input=[{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": concept},
+                    {"type": "input_image", "image_url": image_data_url},
+                ],
+            }],
+            metadata=SAM_METADATA,
+        )
+        result = await parse_sam_output(response.output_text or "")
+        # Mask decoding is pure Python; keep it off the event loop.
+        segments = await asyncio.to_thread(records_to_segments, result, width=width, height=height, id_prefix=id_prefix)
+        observability.update(obs, output={"segments": len(segments)})
+    return segments
 
 
 async def segment_all(image_data_url: str, *, width: int, height: int) -> dict[str, list[Segment]]:

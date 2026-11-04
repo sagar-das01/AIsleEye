@@ -6,12 +6,14 @@ import tempfile
 import time
 from pathlib import Path
 
+from PIL import Image
 from pydantic import ValidationError
 
+from app import observability
 from app.clients import bytes_to_data_url
 from app.config import DATA_DIR, get_settings
 from app.pipeline.hazards import detect_blocked_walkways
-from app.pipeline.inspect import damage_findings, inspect_boxes
+from app.pipeline.inspect import damage_findings, inspect_boxes, prompt_version
 from app.pipeline.preprocess import ALLOWED_MIME_TYPES, InvalidImageError, encode_jpeg, load_image
 from app.pipeline.privacy import apply_privacy
 from app.pipeline.segment import PERSON_CONCEPT, segment, segment_all
@@ -75,8 +77,23 @@ async def run_scan(image_bytes: bytes, mime: str) -> ScanResult:
         return cached
 
     settings = get_settings()
+    with observability.span(
+        "scan", scan_id=scan_id, as_type="chain", sam_model=settings.sam_model, muse_model=settings.muse_model,
+        prompt_version=prompt_version(), review_confidence=settings.review_confidence,
+        walkway_min_confidence=settings.walkway_min_confidence, privacy_blur=settings.privacy_blur,
+    ) as root:
+        result = await _analyse(scan_id, img)
+        observability.update(root, output={
+            "findings": len(result.findings), "boxes": sum(o.label == "box" for o in result.objects), "privacy": result.privacy,
+        })
+    return result
+
+
+async def _analyse(scan_id: str, img: Image.Image) -> ScanResult:
+    settings = get_settings()
     width, height = img.size
-    data_url = bytes_to_data_url(encode_jpeg(img), "image/jpeg")
+    with observability.span("preprocess", width=width, height=height):
+        data_url = bytes_to_data_url(encode_jpeg(img), "image/jpeg")
     timings: dict[str, int] = {}
 
     t = time.perf_counter()
@@ -99,8 +116,10 @@ async def run_scan(image_bytes: bytes, mime: str) -> ScanResult:
     privacy = "off"
     working = img
     if people:
-        outcome = apply_privacy(img, _people_finder(people[0]))
-        privacy = "blurred" if outcome.blurred else "failed"
+        with observability.span("privacy_blur") as obs:
+            outcome = apply_privacy(img, _people_finder(people[0]))
+            privacy = "blurred" if outcome.blurred else "failed"
+            observability.update(obs, output={"status": privacy})
         working = outcome.image if outcome.image is not None else img
 
     t = time.perf_counter()
@@ -110,7 +129,9 @@ async def run_scan(image_bytes: bytes, mime: str) -> ScanResult:
     timings["inspect"] = _ms(t)
 
     t = time.perf_counter()
-    hazards = detect_blocked_walkways(boxes, walkways)
+    with observability.span("hazards", boxes=len(boxes), walkways=len(walkways)) as obs:
+        hazards = detect_blocked_walkways(boxes, walkways)
+        observability.update(obs, output={"blocked": len(hazards)})
     timings["hazards"] = _ms(t)
 
     threshold = settings.review_confidence

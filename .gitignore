@@ -17,3 +17,5 @@ backend/data/tickets/
 backend/data/approvals/
 datasets/
 backend/data/feedback.jsonl
+backend/data/mlflow/
+backend/data/scores.jsonl

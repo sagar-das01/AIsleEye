@@ -83,6 +83,17 @@ export interface DemoPhoto {
 
 export type Inventory = Record<string, { available: number; quarantine: number }>;
 
+export interface ScoreCard {
+  value: number | null;
+  n: number;
+  label: string;
+}
+
+export interface Scores {
+  pipeline_agreement: ScoreCard;
+  agent_score: ScoreCard;
+}
+
 export interface Health {
   status: string;
   models: { vision_agent: string; segmentation: string };
@@ -130,6 +141,7 @@ export const api = {
     }),
   tickets: () => request<Ticket[]>("/tickets"),
   inventory: () => request<Inventory>("/inventory"),
+  scores: () => request<Scores>("/scores"),
   demos: () => request<DemoPhoto[]>("/demo"),
   rejectFinding: (scanId: string, findingId: string, reason = "") =>
     request<Record<string, unknown>>(`/scan/${scanId}/feedback`, {
