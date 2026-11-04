@@ -247,6 +247,17 @@ The script checks the virtualenv, the frontend dependencies, the key (live mode)
 
 `python -m scripts.predemo` (from `backend/`; `--live` adds one small model call to prove the key works) runs the checks that a machine can do: key set, demo photos present, a valid pinned result for each photo that matches its expected counts, every photo scanned and approved in replay mode with the model API pointed at a dead address, Langfuse reachable or disabled, and ports free. It then lists what stays manual: browser zoom and window size, a phone capture test, a backup screen video and rehearsals.
 
+**Synthetic evaluation dataset**
+
+Real photos are often licence-restricted, so you can generate a labelled, licence-free set instead (CC0, drawn in the repo):
+
+```bash
+.venv/bin/python -m scripts.generate_synthetic --count 25   # per class: damaged, intact, blocked, clear
+.venv/bin/python -m scripts.audit_labels                    # then evaluate with scripts.evaluate as usual
+```
+
+It writes to the gitignored `datasets/` folder through the same preprocessing as an upload. Each image carries one label: damaged / intact scenes keep the walkway clear and blocked / clear scenes use undamaged boxes, so the label is unambiguous. Runs are seeded (`--seed`, `--out`, `--classes`) and re-running adds nothing new. The scenes are cartoon-style, so they test the pipeline, not real-world accuracy.
+
 **Using the dashboard**
 
 1. Take a photo (the rear camera opens on a phone) or choose one from the gallery. Photos must be JPEG, PNG or WebP and at most 10 MB.
