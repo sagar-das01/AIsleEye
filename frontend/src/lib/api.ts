@@ -17,22 +17,106 @@ export interface Finding {
   confidence: number;
   bbox: BBox;
   description: string;
-  sku?: string;
+  sku?: string | null;
+  needs_review?: boolean;
+  review_reason?: string | null;
 }
+
+export interface DetectedObject {
+  id: string;
+  label: "box" | "walkway";
+  bbox: BBox;
+  confidence: number;
+  mask_svg: string;
+}
+
+export interface ScanResult {
+  scan_id: string;
+  image_size: { width: number; height: number };
+  objects: DetectedObject[];
+  findings: Finding[];
+  timings_ms: Record<string, number>;
+}
+
+export type ActionStatus = "executed" | "rejected" | "invalid" | "failed";
+
+export interface ActionRecord {
+  tool: string;
+  args: Record<string, unknown>;
+  status: ActionStatus;
+  reason: string | null;
+  result: Record<string, unknown> | null;
+}
+
+export interface Ticket {
+  ticket_id: string;
+  finding_id: string;
+  title: string;
+  severity: Severity;
+  assignee_team: string;
+  status: string;
+  pdf_url: string;
+}
+
+export interface ApproveResult {
+  actions: ActionRecord[];
+  tickets: Ticket[];
+  trace_id: string;
+  iterations: number;
+  within_iteration_cap: boolean;
+  summary: string | null;
+}
+
+export type Inventory = Record<string, { available: number; quarantine: number }>;
 
 export interface Health {
   status: string;
   models: { vision_agent: string; segmentation: string };
 }
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init });
   if (!res.ok) {
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status}`);
+    let detail: string | undefined;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // Non-JSON error bodies carry nothing worth showing.
+    }
+    throw new ApiError(`${init?.method ?? "GET"} ${path} failed: ${res.status}`, res.status, detail);
   }
   return res.json() as Promise<T>;
 }
 
 export const api = {
   health: () => request<Health>("/health"),
+  scan: (file: File) => {
+    const form = new FormData();
+    form.append("image", file);
+    return request<ScanResult>("/scan", { method: "POST", body: form });
+  },
+  approve: (scanId: string, findingIds: string[], skus: Record<string, string> = {}) =>
+    request<ApproveResult>(`/scan/${scanId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finding_ids: findingIds, skus }),
+    }),
+  tickets: () => request<Ticket[]>("/tickets"),
+  inventory: () => request<Inventory>("/inventory"),
 };
+
+export function pdfUrl(ticket: Pick<Ticket, "pdf_url">): string {
+  return `${API_URL}${ticket.pdf_url}`;
+}

@@ -212,7 +212,15 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. The status indicator in the header turns green when the backend is reachable.
+Open <http://localhost:3001> (port 3000 is left to the optional local Langfuse). The status indicator in the header turns green when the backend is reachable.
+
+**Using the dashboard**
+
+1. Take a photo (the rear camera opens on a phone) or choose one from the gallery. Photos must be JPEG, PNG or WebP and at most 10 MB.
+2. The overlay marks every box as OK (green dots, ✓), damaged (red, ✕) or blocking a walkway (red hatch, ⚠ — it pulses once, and not at all with reduced motion); the walkway is a dashed yellow band. Every state also carries a text label.
+3. In the findings panel, untick anything you do not want dispatched. For a damaged box you can enter its SKU so the agent can quarantine stock; nothing in the photo identifies it.
+4. **Approve & Dispatch** runs the agent once (the button locks, so a double click cannot repeat it). The timeline lists every action with its status, including calls the guard blocked, and links each ticket PDF.
+5. The KPI strip shows scans this session, open tickets, units in quarantine and walkway hazards in the current scan.
 
 ## Testing
 
@@ -224,7 +232,7 @@ cd backend
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
 
-# Frontend (Vitest + React Testing Library): API client, backend status, dashboard
+# Frontend (Vitest + React Testing Library): API client, upload, overlay, findings, timeline, dashboard flows
 cd frontend
 npm test            # or: npm run test:watch
 ```
@@ -299,7 +307,7 @@ gh pr create --base master --fill
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
 - [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
 - [x] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
-- [ ] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states
+- [x] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states. Reject and correct buttons, the replay banner and the score cards arrive with Phases 4 to 6
 - [ ] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner
 - [ ] **Phase 5** — Data handling, privacy and guardrails: shared preprocessing, people blur, retention and purge, agent action guard, audit log, needs-review and feedback flow, dataset preparation and label audit
 - [ ] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator with separate pipeline and agent scores (reviewer feedback scores the vision stages, the agent score is automatic), both shown in the dashboard with their sample sizes, MLflow evaluation runs on audited labels
