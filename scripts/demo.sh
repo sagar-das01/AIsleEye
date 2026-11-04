@@ -61,12 +61,16 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$mode" == "replay" ]]; then export DEMO_MODE=replay; fi
+# The local launcher opts in to credential-free persona sign-in explicitly; an exported value still wins.
+export DEMO_SIGN_IN_ENABLED="${DEMO_SIGN_IN_ENABLED:-true}"
 (cd "$root/backend" && exec "$python" -m uvicorn app.main:app --port "$backend_port" >"$log_dir/backend.log" 2>&1) &
 pids+=($!)
 
-if [[ ! -f "$root/frontend/.next/BUILD_ID" ]]; then
-  echo "Building the frontend (first run only)..."
-  (cd "$root/frontend" && NEXT_PUBLIC_API_URL="http://localhost:$backend_port" npm run build >"$log_dir/frontend-build.log" 2>&1) \
+build_id="$root/frontend/.next/BUILD_ID"
+if [[ ! -f "$build_id" ]] || [[ -n "$(find "$root/frontend/src" "$root/frontend/next.config.ts" -newer "$build_id" -print -quit)" ]]; then
+  echo "Building the frontend (first run or sources changed)..."
+  # No NEXT_PUBLIC_API_URL: the browser must use the same-origin /api proxy so the session cookie works.
+  (cd "$root/frontend" && BACKEND_URL="http://127.0.0.1:$backend_port" npm run build >"$log_dir/frontend-build.log" 2>&1) \
     || fail "frontend build failed; see $log_dir/frontend-build.log"
 fi
 (cd "$root/frontend" && exec npm run start >"$log_dir/frontend.log" 2>&1) &
@@ -87,6 +91,7 @@ echo "AIsleEye is running ($mode mode)"
 echo "  Dashboard: http://localhost:$frontend_port"
 echo "  API:       http://localhost:$backend_port/docs"
 [[ "$mode" == "replay" ]] && echo "  Replay mode: results are saved ones and the dashboard says so."
+echo "  Sign-in:   demo personas (DEMO_SIGN_IN_ENABLED=$DEMO_SIGN_IN_ENABLED); identities are not verified, local synthetic data only."
 echo "  Logs:      $log_dir"
 echo "Press Ctrl-C to stop."
 wait

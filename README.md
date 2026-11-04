@@ -159,7 +159,7 @@ Copy the example file to the repository root and add your key (`.env` is git-ign
 cp .env.example .env   # then set MODEL_API_KEY
 ```
 
-`MODEL_API_KEY` is required for model calls. HTTP operations also require the [OIDC and RBAC configuration](#authentication-and-rbac); `/health` remains public. [`.env.example`](.env.example) lists every setting with its default; the Langfuse keys stay empty unless you enable tracing, and `MUSE_MODEL`, `SAM_MODEL` and `MUSE_AGENT_MODEL` must be Standard mode models (the app refuses `*-contributor` IDs, see [Privacy](#privacy)).
+`MODEL_API_KEY` is required for model calls. HTTP operations also require a signed-in [demo persona session](#authentication-and-rbac) (`DEMO_SIGN_IN_ENABLED=true` for a local demo); `/health` and the persona list remain public. [`.env.example`](.env.example) lists every setting with its default; the Langfuse keys stay empty unless you enable tracing, and `MUSE_MODEL`, `SAM_MODEL` and `MUSE_AGENT_MODEL` must be Standard mode models (the app refuses `*-contributor` IDs, see [Privacy](#privacy)).
 
 ### 2. Backend
 
@@ -208,14 +208,11 @@ Per-image latency was measured on one synthetic scene; treat it as a baseline, n
 
 ```bash
 cd frontend
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 npm install
-npm run dev
+npm run dev          # BACKEND_URL defaults to http://127.0.0.1:8000
 ```
 
-Open <http://localhost:3001> (port 3000 is left to the optional local Langfuse). The status indicator in the header turns green when the backend is reachable.
-
-> RBAC foundation increment: the existing dashboard does not yet implement OIDC login or authenticated PDF downloads. It can show backend health, but protected operations require an authenticated API client until the frontend integration lands. Do not deploy this increment as a complete replacement for the existing dashboard workflow.
+Open <http://localhost:3001> (port 3000 is left to the optional local Langfuse). The browser only talks to this origin: Next.js proxies `/api/*` to the fixed `BACKEND_URL`, so the HttpOnly session cookie also covers PDF links. Do not set `NEXT_PUBLIC_API_URL` to the backend for the signed-in dashboard; cross-origin requests would not carry the session cookie. Start the backend with `DEMO_SIGN_IN_ENABLED=true` and choose a role on the first screen. The status indicator in the header turns green when the backend is reachable.
 
 **Demo photos and offline replay**
 
@@ -264,7 +261,16 @@ It writes to the gitignored `datasets/` folder through the same preprocessing as
 2. The overlay marks every box as OK (green dots, ✓), damaged (red, ✕) or blocking a walkway (red hatch, ⚠ — it pulses once, and not at all with reduced motion); the walkway is a dashed yellow band. Every state also carries a text label.
 3. In the findings panel, untick anything you do not want dispatched. For a damaged box you can enter its SKU so the agent can quarantine stock; nothing in the photo identifies it.
 4. **Approve & Dispatch** runs the agent once (the button locks, so a double click cannot repeat it). The timeline lists every action with its status, including calls the guard blocked, and links each ticket PDF.
-5. The KPI strip shows scans this session, open tickets, units in quarantine and walkway hazards in the current scan.
+5. The KPI strip shows scans this session, active (open or in progress) tickets, units in quarantine and walkway hazards in the current scan.
+
+Steps 1 to 4 need the Floor Manager (or Operations Manager / Admin) persona. Findings are labelled as AI proposals: approving means approving them **for dispatch**; a rejection is stored as review feedback, never as model training or ground truth. Each finding can carry an optional location and instructions for the technician, and a damaged box with a known SKU previews its stock move ("−1 available, +1 quarantine") before you approve.
+
+**Technician and stock walkthrough (about 60 s, after step 4)**
+
+1. **Tickets** tab → Unassigned → open the ticket, choose Technician A, add the location and instructions if missing, **Assign**.
+2. **Switch role** → Technician A: the bell shows one unread assignment. Open it, **Acknowledge and start**, add a note, then **Resolve ticket** with completion notes. The ticket moves New → In progress → History.
+3. Technician B (or a second browser profile) sees none of Technician A's work; the manager's board shows the full history.
+4. Back as the Floor Manager, the **Shelf count** card under the findings compares the mask count with system stock for a chosen SKU ("Counted 22 · System 25 available · −3"), flags low-confidence counts as needing review, and **Adjust to counted** reconciles once (capped, audited). The **Stock** tab shows the result and a "⚠ Reorder" badge below the reorder point.
 
 ## Testing
 
@@ -288,23 +294,41 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | Method | Path | Status | Purpose |
 |---|---|---|---|
 | GET | `/health` | ✅ available | Liveness and configured models |
-| GET | `/me` | ✅ available | Authenticated identity, trusted scoped grants, and deployment-wide permissions |
+| GET | `/auth/demo-personas` | ✅ available | Public list of seeded demo personas while `DEMO_SIGN_IN_ENABLED=true` (otherwise `enabled: false`) |
+| POST | `/auth/demo-sign-in` | ✅ available | Body `{persona_id}` only; sets the HttpOnly session cookie and returns identity, permissions and the CSRF token |
+| GET | `/auth/session` | ✅ available | Current identity, permissions and CSRF token; never the session token |
+| POST | `/auth/logout` | ✅ available | Revokes the current session (204) |
+| GET | `/me` | ✅ available | Identity, trusted scoped grants, and deployment-wide permissions |
 | POST | `/scan` | ✅ available | Image → segmented boxes, walkway mask and findings |
 | GET | `/scan/{scan_id}` | ✅ available | Cached scan result, or the pinned demo result flagged `replay: true` |
-| POST | `/scan/{scan_id}/approve` | ✅ available | Body `{finding_ids, skus?}` (`skus` maps a finding to the SKU the supervisor entered). Runs the agent; returns actions with their status, tickets, summary and a `trace_id`; idempotent, so a repeat call returns the first result (`Idempotent-Replay: true`) |
-| GET | `/inventory` | ✅ available | Current inventory, including quarantine |
-| GET | `/tickets` | ✅ available | Incident tickets filtered by role, resource scope, and personal assignment |
-| GET | `/tickets/{ticket_id}.pdf` | ✅ available | Ticket PDF with the same authorization as its ticket |
+| POST | `/scan/{scan_id}/approve` | ✅ available | Body `{finding_ids, skus?, details?}` (`skus` maps a finding to the SKU the supervisor entered; `details` maps a finding to supervisor `location`/`instructions` stored on its ticket). Runs the agent; returns actions with their status, tickets, summary and a `trace_id`; idempotent, so a repeat call returns the first result (`Idempotent-Replay: true`) |
+| GET | `/scan/{scan_id}/count` | ✅ available | Box count from the scan's own masks (`exclude_damaged` default true) with a `needs_review` flag for low-confidence or uninspected boxes |
+| POST | `/scan/{scan_id}/reconcile` | ✅ available | Body `{sku, exclude_damaged?, confirm_needs_review?}`. Sets available stock to the mask count: capped by `INVENTORY_MAX_ADJUST`, once per SKU per scan (a repeat returns the first result), audited whether executed or rejected |
+| GET | `/inventory` | ✅ available | Current inventory, including quarantine (`reorder_point` appears when set) |
+| GET | `/inventory/board` | ✅ available | Stock board rows: available, quarantine, total, reorder point (default 10) and `low_stock` |
+| GET | `/tickets` | ✅ available | Tickets filtered by role, scope and personal assignment; optional `status=open,in_progress,resolved,active` and `mine=true`. Each row carries its `capabilities` for the caller |
+| GET | `/tickets/{ticket_id}` | ✅ available | One authorized ticket with its current `version` |
+| GET | `/tickets/{ticket_id}/history` | ✅ available | Lifecycle events (created, assigned, reassigned, acknowledged, note, resolved) |
+| POST | `/tickets/{ticket_id}/assignment` | ✅ available | Body `{assignee_id, expected_version?, location?, instructions?, reason?}`; assign/reassign to an eligible technician (reason required to reassign) |
+| POST | `/tickets/{ticket_id}/acknowledge` | ✅ available | Assignee only; `open` → `in_progress` in one step |
+| POST | `/tickets/{ticket_id}/notes` | ✅ available | Body `{text}`; sanitized work note by the assignee or an authorized manager |
+| POST | `/tickets/{ticket_id}/resolve` | ✅ available | Body `{notes, expected_version?}`; assignee only, completion notes required |
+| GET | `/tickets/{ticket_id}.pdf` | ✅ available | Creation-snapshot PDF with the same authorization as its ticket |
+| GET | `/technicians` | ✅ available | Eligible assignees (optionally for `ticket_id`) for roles that can assign; not a user directory |
+| GET | `/notifications` | ✅ available | The caller's own in-app inbox with an unread count |
+| POST | `/notifications/{notification_id}/read` | ✅ available | Marks one of the caller's notifications read; never changes the ticket |
+| GET | `/admin/accounts` | ✅ available | Admin only: demo accounts with roles and active status |
+| POST | `/admin/accounts/{user_id}/active` | ✅ available | Admin only: body `{active}`; disabling revokes the account's sessions |
 | GET | `/compliance` | ✅ available | Compliance log |
 | POST | `/scan/{scan_id}/feedback` | ✅ available | Body `{finding_id, action: reject or correct, reason?, corrected_type?}`; appended to `data/feedback.jsonl`. Evaluation data only: it changes no setting or prompt. (The pipeline score on the trace is Phase 6.) |
 | DELETE | `/scan/{scan_id}` | ✅ available | Purge a cached scan (204). The pinned demo store is out of reach: a demo id is a 404 |
-| GET | `/audit` | ✅ available | Audit log of agent actions |
+| GET | `/audit` | ✅ available | Audit log of agent actions, sign-ins, ticket events and reconciles |
 | GET | `/demo` | ✅ available | The demo photos, each with its scan id and whether a saved result exists |
 | GET | `/demo/{name}.jpg` | ✅ available | One demo photo, byte for byte (its hash is the scan id of the saved result) |
 | GET | `/scores` | ✅ available | Pipeline agreement and agent score with sample sizes (a value only once `SCORE_MIN_REVIEWS` is reached), components, and a breakdown by prompt version |
 | POST | `/tickets/{ticket_id}/feedback` | 🚧 planned (optional) | Rate a created ticket, with an optional corrected team or severity; feeds the agent score |
 
-All data endpoints require an OIDC bearer token; only `/health` and the API documentation/schema are public. Replay mode enforces the same permissions.
+All data endpoints require a demo session cookie; only `/health`, `/auth/demo-personas`, sign-in and the API documentation/schema are public. Every state-changing request also needs the session's `X-CSRF-Token` header and, when the browser sends one, an allowed `Origin`. Replay mode enforces the same permissions. Responses carry `Cache-Control: no-store`.
 
 **Finding schema**
 
@@ -326,84 +350,83 @@ All data endpoints require an OIDC bearer token; only `/health` and the API docu
 
 ## Authentication and RBAC
 
-This is the first, API-first RBAC increment: verified identity and protection of existing endpoints. Technician assignment, acknowledgement/resolution, notification delivery, reporter submission/status views, admin editing screens, and frontend login are not implemented yet.
+### Local demo sign-in (not identity verification)
 
-### Identity and trusted access directory
-
-Use an OIDC provider issuing **RS256-signed JWT access tokens** for a dedicated AIsleEye API audience. Configure the root `.env`:
+The MVP uses **"Sign in as {role}" buttons** for seeded demo personas: no usernames, passwords, external identity provider or extra service. It exists to demonstrate the role-scoped workflow on synthetic, disposable data and is **not** a security boundary between demo participants: anyone who can open the app can choose Admin.
 
 ```dotenv
-OIDC_ISSUER=https://identity.example.com/
-OIDC_AUDIENCE=aisleeye-api
-OIDC_JWKS_URL=https://identity.example.com/.well-known/jwks.json
-RBAC_USERS_FILE=backend/data/access.json
-RBAC_WAREHOUSE_ID=warehouse-a
+DEMO_SIGN_IN_ENABLED=true          # off by default and independent of DEMO_MODE
+SESSION_FILE=backend/data/sessions.json
+SESSION_TTL_HOURS=8
+SESSION_COOKIE_SECURE=false        # localhost over HTTP only; set true behind HTTPS
+RBAC_USERS_FILE=backend/data/users.json
+RBAC_WAREHOUSE_ID=default
 ```
 
-Use your provider's actual issuer, audience, and JWKS URL. Issuer and JWKS URLs must use HTTPS. The backend verifies signature, issuer, audience, expiry, issued-at, and subject; optional not-before claims are also enforced. Signing-key requests time out after five seconds, and key sets are cached for five minutes. Missing/invalid auth configuration or an unavailable access directory fails closed; there is no anonymous/demo bypass.
+- With the flag off, the persona list is empty, sign-in returns `403`, and existing sessions stop working (`401`). There is no fallback to Admin or anonymous access, including in replay mode. [`scripts/demo.sh`](scripts/demo.sh) turns it on explicitly for the local launcher.
+- Sign-in accepts only a known persona ID; roles and scopes always come from the server-side seed in [`backend/app/personas.py`](backend/app/personas.py). Browser-supplied grants are rejected.
+- Sessions are opaque random tokens in an HttpOnly, `SameSite=Lax` cookie with an eight-hour absolute expiry. Only a SHA-256 digest is stored, in the git-ignored session file (atomic, locked writes). Expired, unknown and revoked sessions return `401`; an unreadable session or user store returns `503`.
+- Every mutation needs the session-bound CSRF token (`X-CSRF-Token`) and an allowed `Origin`. Tokens never appear in URLs, logs or the audit log.
+- "Switch role" and "Sign out" revoke the session server-side and remount the workspace, so no tickets, inbox or scan state carry over. Use separate browser profiles to show a manager and a technician side by side.
+- Keep this mode on loopback. A phone demo over the LAN needs local HTTPS and `SESSION_COOKIE_SECURE=true`; neither turns persona selection into real authentication. Never expose it publicly or use it with real operational data. Production identity is a separate future milestone.
 
-Create the deployment-controlled, git-ignored access directory before use:
+| Persona | Role | Notes |
+|---|---|---|
+| Admin | `admin` | Everything, including demo account administration; cannot be assigned work |
+| Operations Manager, Floor Manager | `operations_manager`, `floor_manager` | Scan, review, approve, assign/reassign, stock and reconcile |
+| Technician A, Technician B | `technician` | Two distinct users: each sees and works only on their own assignments |
+| Reporter | `reporter` | No operational screens yet (report submission and status are deferred) |
+| Auditor | `auditor` | Read-only tickets, compliance and audit log |
+| More roles | `dispatcher` (Safety team), `safety_officer`, `inventory_controller`, `quality_inspector`, `viewer`, `contractor` | Permission bundles for separated responsibilities |
 
-```json
-{
-  "users": [
-    {
-      "subject": "oidc-subject-for-admin",
-      "display_name": "Warehouse administrator",
-      "active": true,
-      "grants": [{"role": "admin", "warehouse_id": "warehouse-a"}]
-    },
-    {
-      "subject": "oidc-subject-for-floor-manager",
-      "display_name": "Floor manager",
-      "grants": [{"role": "floor_manager", "warehouse_id": "warehouse-a"}]
-    },
-    {
-      "subject": "oidc-subject-for-technician",
-      "display_name": "Maintenance technician",
-      "grants": [{"role": "technician", "warehouse_id": "warehouse-a", "team": "Maintenance"}]
-    }
-  ]
-}
-```
+### Permissions and scope
 
-Replace subjects with exact provider subject identifiers. Provision the first admin explicitly; public signup cannot grant access. Relative directory paths resolve from the repository root regardless of backend working directory. Keep the file readable only by the service and deployment administrators, use atomic replacement when updating it, and do not commit real identities. User records are reloaded on every request, so disabling access or removing grants takes effect on the next request without waiting for token expiry.
+Authorization combines **role permissions**, **warehouse/area/team scope** and **individual assignment**, and denies by default. Each grant binds one role to a warehouse with optional `area_id` and `team`; scopes from separate grants are never combined. Admin is the explicit global exception, but never bypasses validation, inventory limits, human approval or valid state transitions.
 
-Each user can have multiple grants. Each grant independently binds a role to a warehouse and optional `area_id` and `team`; scopes from separate grants are never combined. An optional timezone-aware `expires_at` on the user limits access, particularly for contractors.
-
-### Current permissions
-
-| Role identifier | Existing API access |
+| Role identifier | Access |
 |---|---|
-| `admin` | Everything, across scopes; input validation and human-approval/agent guardrails still apply |
-| `operations_manager`, `floor_manager` | Scoped tickets; whole-warehouse grants also allow scan/review/approve/delete, inventory, compliance, and scores |
-| `technician`, `contractor` | Personally assigned tickets/PDFs within grant scopes only |
-| `auditor` | Scoped tickets; whole-warehouse grants allow compliance and audit reads, never writes |
-| `dispatcher` | Tickets within an explicitly required team scope |
-| `safety_officer` | Safety-team tickets within grant scopes |
-| `inventory_controller` | Inventory-team tickets; whole-warehouse grants also allow inventory reads |
-| `quality_inspector` | Tickets explicitly labelled `finding_type: box_damage` within grant scopes |
-| `viewer` | Whole-warehouse score summaries only |
-| `reporter` | Authenticated identity only until ownership-aware report endpoints exist |
+| `admin` | Everything, across scopes, including `/admin/accounts` |
+| `operations_manager`, `floor_manager` | Scoped tickets and assignment; whole-warehouse grants also allow scan/review/approve/delete, inventory, reconcile, compliance and scores |
+| `technician`, `contractor` | Personally assigned tickets, PDFs and history only; acknowledge, notes and resolve |
+| `auditor` | Read-only scoped tickets; whole-warehouse grants allow compliance and audit reads |
+| `dispatcher` | Tickets and assignment within an explicitly required team scope |
+| `safety_officer` | Safety-team tickets |
+| `inventory_controller` | Inventory-team tickets, inventory reads and reconcile |
+| `quality_inspector` | Tickets with `finding_type: box_damage` |
+| `viewer` | Score summaries only |
+| `reporter` | Identity only |
 
-Roles describe permissions, not specialties: Electrical and Housekeeping are teams, not new roles. Legacy tickets without assignment remain manager/auditor-visible, not technician-visible. Legacy ticket warehouse scope defaults to `RBAC_WAREHOUSE_ID`; do not share one data directory among different warehouse deployments. Changing that deployment identifier requires an explicit data migration.
+Missing or invalid sessions return `401`, a forbidden capability `403`, and an inaccessible or missing ticket, PDF or notification `404` (IDs cannot be probed). Area/team-limited grants cannot read unpartitioned data such as inventory, audit, compliance or scores. Disabling an account (admin only) revokes its sessions immediately and removes it from assignment.
 
-Area/team-limited grants cannot access global inventory, audit, compliance, scores, or legacy scan endpoints because those responses are not partitioned by area/team. They can read matching scoped tickets. Missing resource scope never widens a narrow grant. Only admins bypass scope checks. Specialist verification and mutation capabilities remain deferred rather than implicitly gaining supervisor permissions.
+### Ticket lifecycle
 
-`GET /me` returns identity/grants and permissions for unpartitioned deployment-wide endpoints. Object-scoped ticket access is additionally evaluated per ticket. Missing/invalid identity returns `401`; an unprovisioned, disabled, expired, or forbidden user returns `403`; hidden or missing ticket PDFs both return `404`. Authorization infrastructure errors return `503` without disclosing tokens or configuration contents.
+```text
+approved finding -> ticket (open, unassigned) -> assigned to a technician -> acknowledged (in_progress) -> resolved
+```
 
-Pass tokens in `Authorization: Bearer ...`, including PDF requests. Do not put tokens in URLs. Use an authenticated API client for this increment; frontend login and authenticated blob/navigation handling are follow-up work. Successful state-changing authorization decisions include the actor in the existing audit log; an authorization event records permission to attempt an action, not proof that the downstream action completed.
+- Tickets live in one authoritative store, `backend/data/tickets/workflow.json`, with their lifecycle events and notification intents. Version, assignment and status checks happen under the same lock and atomic write, so repeated or concurrent requests create one transition, and stale ones get `409`.
+- Assignment needs a location and instructions (from approval `details` or the assign form), an active technician eligible for the ticket's team and area, and a reason when reassigning. Reassignment returns work to `open`, clears the acknowledgement and immediately removes the old assignee's access; their old notification keeps only a neutral "no longer assigned" reference.
+- Acknowledging is the start of work (no separate "start" step); opening a ticket or reading a notification never acknowledges it. Resolution needs completion notes. Resolved tickets cannot be reassigned or noted.
+- `open` and `in_progress` both count as active: the guard and both agent runtimes refuse a duplicate ticket for a finding with acknowledged work.
+- PDFs are clearly labelled creation snapshots; the app shows the current assignee and status. Ticket details and history survive scan-cache expiry; the PDF link may then return `404`.
+- Lifecycle events are the durable record and are mirrored to the audit log with the actor.
 
-### Verification and next increments
+**Migration.** A legacy `tickets/index.jsonl` is imported automatically on first access (IDs, creation times and PDFs preserved, unassigned so only managers see it) and then moved to a timestamped `index.*.migrated.jsonl` backup. Import is repeatable and skips known IDs; records without an ID or with an unknown assignee are reported in the store's `migration_issues` rather than guessed. The old OIDC `access.json` is no longer read; it stays where it was as a backup.
 
-Offline pipeline/API tests explicitly override identity with a test-only admin. Tests marked `rbac` use the real authentication dependency and locally generated RSA/JWKS fixtures; no identity-provider network calls are made. Run them with:
+**Deployment model.** File storage is safe for **one backend worker** only. Multi-worker or replicated use needs a transactional database with conditional updates and an outbox first.
+
+### Notifications
+
+Assignments and reassignments create one in-app notification for the responsible technician, stored in the same atomic write as the assignment and de-duplicated per ticket, assignment version, recipient and event. The bell polls every 15 seconds while the app is open and refreshes on focus and reconnect; unread notifications wait for the next sign-in. There is no Web Push, email or SMS, so nothing is delivered while the app is closed.
+
+### Tests
+
+Pipeline tests use an explicit test-only admin override. Tests marked `rbac` exercise the real sessions, cookies, CSRF and authorization without any network:
 
 ```bash
 cd backend
-.venv/bin/python -m pytest tests/test_auth.py
+.venv/bin/python -m pytest tests/test_auth.py tests/test_ticket_workflow.py tests/test_inventory_board.py
 ```
-
-Next: authoritative mutable ticket storage and scope metadata, eligible-assignee selection, acknowledgement-to-in-progress and resolution transitions, durable notification intents, mobile New/In progress/History views, and OIDC login. Do not treat this foundation as the completed technician workflow.
 
 ## Branching and versioning
 
@@ -443,7 +466,8 @@ gh pr create --base master --fill
 - [x] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator with separate pipeline and agent scores (reviewer feedback scores the vision stages, the agent score is automatic), both shown in the dashboard with their sample sizes, MLflow evaluation runs on audited labels
 - [x] **Phase 7** — Hardening: timeouts and retries, prompt-injection regression cases, tracing and evaluation failure drills (an accuracy table on real audited labels is still open: there are none yet)
 - [x] **Phase 8** — Demo prep: final demo freeze, one-command demo start, pre-demo checklist, dataset attribution (the backup video, phone test and rehearsals are manual and not done)
-- [~] **RBAC** — Backend OIDC verification, trusted scoped roles, protected existing endpoints, and assignment-filtered ticket/PDF reads; lifecycle, notifications, admin editing, and mobile/login integration remain
+- [x] **RBAC and technician workflow** — Local "Sign in as {role}" demo sessions (cookie, CSRF, revocation), scoped role/assignment authorization, ticket assignment, acknowledgement, notes and resolution, in-app notifications, mobile technician workspace and demo account administration (reporter submission and specialist verification are deferred)
+- [x] **Live stock board** — Stock board with low-stock badges, mask-based shelf count with needs-review, guarded once-per-scan reconcile and a damage-to-stock preview
 - [ ] **Later** — Video scans, on-device inference with Muse Glimmer, PPE and spill detection
 
 ## Guardrails, privacy and data handling
@@ -466,7 +490,7 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 - **Cost and limits** — pay-as-you-go prices from the [pricing page](https://dev.meta.ai/docs/pricing-rate-limits): SAM 3.1 $2.50 per 1,000 images (a scan makes three calls, box, walkway and person, under $0.01); `muse-spark-1.3` $1.25 per million input and $4.25 per million output tokens. A scan with a handful of crops at minimal reasoning is roughly two to three cents; measure it from `usage` once real photos run. Limits per team: 3,000 requests per minute for `sam-3.1` and `muse-spark-1.3` (4 M tokens per minute for Muse). The client retries 429s and 5xx responses twice. Each call times out after `REQUEST_TIMEOUT_S` (90 s) and a whole scan after `SCAN_TIMEOUT_S` (120 s); a timeout answers 504 ("took too long", with a retry in the UI) and any other model failure 502. For a demo photo with a saved result, either falls back to that result behind the replay banner.
 - **Metadata** — uploads are size- and type-limited, stripped of EXIF (GPS, device) and downscaled.
 - **People** — people are segmented (`person`) and blurred before any box crop goes to the inspection model; the cache holds no pixels at all, and ticket PDFs carry metadata only. The detection passes (box, walkway, person) see the unblurred image, so the blur protects later stages and anything stored, not those first calls. Switch it off with `PRIVACY_BLUR=false`. If the pass fails, the scan is flagged and no crops may be kept.
-- **Minimal storage** — original uploads are not stored, only derived results. OIDC identities are mapped to a deployment-controlled access directory containing display names, active/expiry status, and scoped role grants; passwords and bearer tokens are not stored. Scan IDs are content hashes.
+- **Minimal storage** — original uploads are not stored, only derived results. Demo accounts are seeded personas; only their active flags (`users.json`) and SHA-256 digests of session tokens (`sessions.json`) are stored, never passwords or raw tokens. Tickets keep work notes and assignment history but no photos. Scan IDs are content hashes.
 - **Retention** — cached scans older than `CACHE_TTL_DAYS` (default 7) are deleted on startup and can be purged on demand with `DELETE /scan/{scan_id}`; neither touches the pinned demo store used for replay. Only cache files named after a scan hash are ever removed, symlinks are skipped, and a TTL of zero or less is refused. Photos are never stored; they are sent to the Meta Model API as described above.
 - **Secrets** — API keys (Meta Model API, and Langfuse if enabled) live only in the git-ignored root `.env`; nothing secret is committed.
 
