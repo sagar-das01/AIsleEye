@@ -18,7 +18,9 @@ import math
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from app import scoring
 from app.config import BACKEND_DIR, get_settings
@@ -161,11 +163,18 @@ def _mlflow():
     return mlflow
 
 
-def _mlflow_or_notice():
-    mlflow = _mlflow()
-    if mlflow is None:
-        print("mlflow is not installed: metrics are printed only. Install it with `pip install -r requirements-eval.txt`.")
-    return mlflow
+def _log(log: Callable[[Any], None]) -> int:
+    """Record to MLflow if it is installed and works. The metrics are already printed, so a failure here costs only the record."""
+    try:
+        mlflow = _mlflow()
+        if mlflow is None:
+            print("mlflow is not installed: metrics are printed only. Install it with `pip install -r requirements-eval.txt`.")
+            return 0
+        log(mlflow)
+        return 0
+    except Exception as exc:
+        print(f"MLflow logging failed ({type(exc).__name__}); the metrics above were not recorded.")
+        return 2
 
 
 def _write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
@@ -184,24 +193,26 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     if args.feedback_only:
-        mlflow = _mlflow_or_notice()
         metrics = feedback_metrics(scoring.read_lines())
         print(json.dumps(metrics, indent=1))
-        if mlflow and metrics:
+        if not metrics:
+            return 0
+
+        def log_feedback(mlflow: Any) -> None:
             with mlflow.start_run(run_name=args.run_name or "feedback"):
                 mlflow.log_metrics(metrics)
-        return 0
+
+        return _log(log_feedback)
 
     manifest_rows = select_rows(args.root, args.split)
     if not manifest_rows:
         print(f"No labelled images in {args.root / 'manifest.csv'} for split {args.split!r}.")
         return 1
-    mlflow = _mlflow_or_notice()
     rows = asyncio.run(evaluate_rows(args.root, manifest_rows))
     metrics, wrong = compute_metrics(rows), disagreements(rows)
     print(json.dumps({"config": configuration(), "metrics": metrics, "disagreements": len(wrong)}, indent=1))
 
-    if mlflow:
+    def log_run(mlflow: Any) -> None:
         with mlflow.start_run(run_name=args.run_name), tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             mlflow.log_params({**configuration(), "split": args.split})
@@ -210,7 +221,8 @@ def main(argv: list[str]) -> int:
             _write_csv(out / "disagreements.csv", wrong, ["file", "label", "model_says"])
             (out / "confusion.json").write_text(json.dumps(confusion(rows), indent=1))
             mlflow.log_artifacts(str(out))
-    return 0
+
+    return _log(log_run)
 
 
 if __name__ == "__main__":

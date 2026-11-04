@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -74,16 +75,23 @@ async def scan(image: Annotated[UploadFile, File()]) -> ScanResult:
             if saved is None:
                 raise HTTPException(404, "No saved replay result for this photo. Choose one of the demo photos.")
             return _replayed(saved)
-        return await run_scan(data, image.content_type)
+        return await asyncio.wait_for(run_scan(data, image.content_type), get_settings().scan_timeout_s)
     except InvalidImageError as exc:
         raise HTTPException(422, str(exc)) from None
+    except (openai.APITimeoutError, TimeoutError) as exc:
+        logger.warning("Scan timed out: %s", type(exc).__name__)
+        return _fallback_or_raise(data, 504, "The vision model service took too long. Please try again, or use a smaller photo.")
     except openai.APIError as exc:
         logger.warning("Model API call failed: %s", type(exc).__name__)
-        # A failing or slow API must not sink the demo: fall back to the saved result, flagged as a replay.
-        pinned = load_pinned(scan_id_for(data))
-        if pinned is not None:
-            return _replayed(pinned)
-        raise HTTPException(502, "The vision model service is unavailable. Please try again shortly.") from None
+        return _fallback_or_raise(data, 502, "The vision model service is unavailable. Please try again shortly.")
+
+
+def _fallback_or_raise(data: bytes, status: int, message: str) -> ScanResult:
+    # A failing or slow API must not sink the demo: fall back to the saved result, flagged as a replay.
+    pinned = load_pinned(scan_id_for(data))
+    if pinned is not None:
+        return _replayed(pinned)
+    raise HTTPException(status, message) from None
 
 
 @app.get("/scan/{scan_id}", response_model=ScanResult)
