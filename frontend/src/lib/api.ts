@@ -132,7 +132,7 @@ export const api = {
   demoPhoto: async (demo: Pick<DemoPhoto, "id" | "image_url">): Promise<File> => {
     const res = await fetch(`${API_URL}${demo.image_url}`, { cache: "no-store" });
     if (!res.ok) throw new ApiError(`GET ${demo.image_url} failed: ${res.status}`, res.status);
-    return new File([await res.blob()], `${demo.id}.jpg`, { type: "image/jpeg" });
+    return new File([await res.arrayBuffer()], `${demo.id}.jpg`, { type: "image/jpeg" });
   },
 };
 
