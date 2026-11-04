@@ -61,14 +61,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$mode" == "replay" ]]; then export DEMO_MODE=replay; fi
-# The local launcher opts in to credential-free persona sign-in explicitly; an exported value still wins.
+# The local launcher opts in to credential-free persona sign-in explicitly (an exported value still wins), and the
+# server listens on loopback only: persona selection is not identity verification.
 export DEMO_SIGN_IN_ENABLED="${DEMO_SIGN_IN_ENABLED:-true}"
-(cd "$root/backend" && exec "$python" -m uvicorn app.main:app --port "$backend_port" >"$log_dir/backend.log" 2>&1) &
+(cd "$root/backend" && exec "$python" -m uvicorn app.main:app --host 127.0.0.1 --port "$backend_port" >"$log_dir/backend.log" 2>&1) &
 pids+=($!)
 
 build_id="$root/frontend/.next/BUILD_ID"
-if [[ ! -f "$build_id" ]] || [[ -n "$(find "$root/frontend/src" "$root/frontend/next.config.ts" -newer "$build_id" -print -quit)" ]]; then
-  echo "Building the frontend (first run or sources changed)..."
+if [[ ! -f "$build_id" ]] || [[ -n "$(find "$root/frontend/src" "$root/frontend/package.json" "$root/frontend/next.config.ts" -newer "$build_id" -print -quit)" ]]; then
+  echo "Building the frontend (first run, or the source changed)..."
   # No NEXT_PUBLIC_API_URL: the browser must use the same-origin /api proxy so the session cookie works.
   (cd "$root/frontend" && BACKEND_URL="http://127.0.0.1:$backend_port" npm run build >"$log_dir/frontend-build.log" 2>&1) \
     || fail "frontend build failed; see $log_dir/frontend-build.log"

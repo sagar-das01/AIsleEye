@@ -30,7 +30,7 @@ def test_the_repository_as_committed_passes_every_offline_check():
 
 
 def test_the_replay_check_leaves_the_environment_and_data_as_it_found_them():
-    before = {k: os.environ.get(k) for k in ("DEMO_MODE", "MODEL_API_BASE_URL")}
+    before = {k: os.environ.get(k) for k in ("DEMO_MODE", "MODEL_API_BASE_URL", "DEMO_SIGN_IN_ENABLED", "SESSION_FILE", "RBAC_USERS_FILE")}
     from app import audit
     from app.agent import tools
 

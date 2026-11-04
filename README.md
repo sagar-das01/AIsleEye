@@ -24,6 +24,7 @@ Agent runs are traced with Langfuse and scored from automatic checks and reviewe
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
+- [Configuration](#configuration)
 - [Testing](#testing)
 - [API](#api)
 - [Authentication and RBAC](#authentication-and-rbac)
@@ -47,7 +48,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 
 ## How it works
 
-1. **Scan** — a supervisor uploads a photo of an aisle or pallet, or takes one with the phone camera 🚧.
+1. **Scan** — a supervisor uploads a photo of an aisle or pallet, or takes one with the phone camera.
 2. **Preprocess** — the upload is validated (type, size, content), oriented, stripped of metadata and downscaled.
 3. **Protect privacy** — a `person` SAM pass runs beside the detection passes; people are blurred (Gaussian) before any box crop is sent for inspection. The detection pass itself sees the original. If the pass fails, the scan is flagged `privacy: failed` and the dashboard says no crops are kept.
 4. **Segment** — SAM 3.1 is prompted with concepts such as `cardboard box` and `floor tape`, returning a box and a pixel mask for every instance.
@@ -58,7 +59,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 9. **Dispatch** — a LangChain agent (Muse Spark, LangGraph runtime) calls tools to create a PDF incident ticket, move damaged units to quarantine and append a compliance log entry. Every tool argument is validated before execution, and each action is written to an append-only audit log.
 10. **Trace and score** — one Langfuse trace per scan covers every stage, model call, tool call and guard verdict (never images). Each agent run gets automatic scores (the agent score). The supervisor's approve, reject and correct decisions on findings become a separate pipeline score on the same trace, because that review judges the vision stages, not the agent.
 
-🚧 marks capabilities that are planned (see the [Roadmap](#roadmap)).
+🚧 marks the few capabilities that are planned and not built (see the [Roadmap](#roadmap)).
 
 ## Architecture
 
@@ -85,7 +86,9 @@ flowchart TD
 
   MLF["MLflow<br/>offline evaluation"]
 
-  U -->|photo| PRE
+  AUTHZ{{"Auth and RBAC<br/>demo persona session · scoped roles"}}
+  U -->|"photo / approve + session cookie"| AUTHZ
+  AUTHZ --> PRE
   BLUR --> SEG["SAM 3.1<br/>boxes + walkway masks"]
   SEG --> VLM["Muse Spark<br/>damage inspection per crop"]
   SEG --> HZ["Geometric hazard check<br/>mask overlap"]
@@ -95,7 +98,7 @@ flowchart TD
   F -->|overlay| U
   DEMO[("Pinned demo store<br/>replay mode")] -.->|"replay banner"| U
   U -->|"reject / correct + reason"| FB[("Feedback log")]
-  U -->|approved findings| AG
+  AUTHZ -->|approved findings| AG
   FB -->|pipeline score| SCORE
   AG -->|run outcome| SCORE
   AG -.->|trace| LF
@@ -103,17 +106,18 @@ flowchart TD
   SCORES --> MLF
 ```
 
-The tracing, scoring and evaluation layers are optional (Phase 6); the rest, including the privacy blur, action guard, feedback log, audit log, pinned demo store and replay mode, is built.
+Every data route sits behind authentication and role-based access control (see [Authentication and RBAC](#authentication-and-rbac)). Tracing, scoring and evaluation are optional layers; the rest, including the privacy blur, action guard, feedback log, audit log, pinned demo store and replay mode, is built.
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
 | Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 |
-| Backend | Python 3.13, FastAPI, Pydantic v2, OpenAI SDK (pointed at Meta Model API), LangChain + LangGraph for the agent stage 🚧 |
+| Backend | Python 3.13, FastAPI, Pydantic v2, OpenAI SDK (pointed at Meta Model API), LangChain + LangGraph for the agent stage |
+| Auth | Local "Sign in as {role}" demo personas with opaque server-side sessions (HttpOnly cookie + CSRF token); scoped role grants and per-ticket assignment checks |
 | Segmentation parsing | [`meta-sam-parser`](https://dev.meta.ai/docs/sam/client-libraries) |
 | Imaging / reports | Pillow, NumPy, ReportLab |
-| Storage (MVP) | JSON / JSONL files on disk (inventory, tickets, audit, feedback and score logs) — no database required |
+| Storage (MVP) | JSON / JSONL files on disk under `backend/data/` (inventory, the ticket workflow store, sessions, account flags, audit, feedback and score logs), written atomically — no database required |
 | Agent tracing | Langfuse — optional, a no-op when not configured |
 | Offline evaluation | MLflow — local store, evaluation runs only (`requirements-eval.txt`) |
 | CI/CD | GitHub Actions: branch-name check + automatic semantic releases |
@@ -124,31 +128,58 @@ The tracing, scoring and evaluation layers are optional (Phase 6); the rest, inc
 .
 ├── backend/
 │   ├── app/
-│   │   ├── main.py          # FastAPI app, CORS, /health
-│   │   ├── config.py        # Settings loaded from the root .env
-│   │   ├── clients.py       # Meta Model API client + image helpers
-│   │   └── pipeline/        # SAM segmentation, damage inspection, hazards, /scan orchestration
-│   ├── scripts/
-│   │   └── smoke_test.py    # Verifies every model capability end to end
-│   ├── tests/               # pytest suite (offline)
-│   ├── requirements.txt
-│   └── requirements-dev.txt
+│   │   ├── main.py              # FastAPI app, CORS, /health, /scan, /scan/{id}, startup retention purge
+│   │   ├── config.py            # Settings loaded from the root .env
+│   │   ├── clients.py           # Meta Model API client (OpenAI SDK, OS trust store) + image helpers
+│   │   ├── schemas.py           # Pydantic models: findings, scan results
+│   │   ├── auth.py              # session lookup, CSRF/Origin checks, scoped permission and assignment policies
+│   │   ├── identity.py          # roles, permissions, grants and the user model
+│   │   ├── personas.py          # seeded demo personas and admin-controlled active flags
+│   │   ├── sessions.py          # opaque demo sessions (token digests only)
+│   │   ├── workflow.py          # ticket store: assignment, lifecycle events, notifications, legacy migration
+│   │   ├── pipeline/            # preprocess, privacy (blur), segment (SAM), inspect (Muse), hazards, scan orchestration
+│   │   ├── agent/               # orchestrator (LangChain agent), tools, built-in rules dispatcher
+│   │   ├── guard.py             # action guard between the agent and the tools
+│   │   ├── audit.py             # append-only audit log
+│   │   ├── review.py            # needs-review flags
+│   │   ├── retention.py         # cache TTL purge and DELETE /scan
+│   │   ├── feedback.py          # supervisor feedback log
+│   │   ├── scoring.py           # pipeline and agent scores, /scores report
+│   │   ├── observability.py     # optional Langfuse tracing, image masking
+│   │   ├── replay.py            # pinned demo store and replay mode
+│   │   ├── sanitize.py          # strips markup and links from model-written text
+│   │   ├── storage.py           # atomic JSON / JSONL helpers with per-file locks
+│   │   └── routes_*.py          # auth, agent/inventory, tickets, demo, feedback and scores routers
+│   ├── prompts/                 # versioned prompts: agent_system_v1.txt, inspect_v1.txt
+│   ├── scripts/                 # smoke_test, make_demo_images, freeze_demo, predemo, prepare_dataset,
+│   │                            #   generate_synthetic, audit_labels, evaluate, access (see below)
+│   ├── data/
+│   │   ├── demo/                # pinned demo results (tracked; the purge never touches them)
+│   │   ├── inventory.seed.json  # starting stock, copied to inventory.json on first use
+│   │   └── ...                  # runtime files, git-ignored (cache, tickets, approvals, sessions, users, logs, mlflow)
+│   ├── tests/                   # pytest suite (offline)
+│   └── requirements*.txt        # runtime, dev (tests) and eval (MLflow) dependencies
 ├── frontend/
 │   └── src/
-│       ├── app/             # Dashboard page, layout, dark industrial theme
-│       ├── components/      # UI components (e.g. backend status)
-│       └── lib/api.ts       # Typed API client
+│       ├── app/                 # page, layout, dark industrial theme
+│       ├── components/          # AuthGate (role sign-in), Workspace, Dashboard, TicketQueues, TicketDetail,
+│       │                        #   NotificationBell, StockBoard, ShelfCountCard, AdminPanel, UploadPanel,
+│       │                        #   DemoGallery, ScanOverlay, FindingsList, ActionTimeline, KpiStrip, BackendStatus
+│       └── lib/                 # api.ts (typed same-origin client), session.tsx, scan.ts (validation, friendly errors)
+├── demo_images/                 # seven synthetic demo photos + manifest.json
+├── infra/langfuse/              # optional local Langfuse (docker compose)
+├── scripts/                     # demo.sh (one-command demo), langfuse-local.sh
 └── .github/
     ├── scripts/next_version.sh
-    └── workflows/           # ci.yml, branch-name.yml, release.yml
+    └── workflows/               # ci.yml, branch-name.yml, release.yml
 ```
 
 ## Getting started
 
 ### Prerequisites
 
-- Python 3.10+ (3.13 recommended)
-- Node.js 20.17+ and npm
+- Python 3.11+ (3.13 recommended; CI runs 3.13)
+- Node.js 20.17+ and npm (CI runs Node 22)
 - A Meta Model API key from the [developer dashboard](https://dev.meta.ai/)
 
 ### 1. Configure environment
@@ -159,7 +190,7 @@ Copy the example file to the repository root and add your key (`.env` is git-ign
 cp .env.example .env   # then set MODEL_API_KEY
 ```
 
-`MODEL_API_KEY` is required for model calls. HTTP operations also require a signed-in [demo persona session](#authentication-and-rbac) (`DEMO_SIGN_IN_ENABLED=true` for a local demo); `/health` and the persona list remain public. [`.env.example`](.env.example) lists every setting with its default; the Langfuse keys stay empty unless you enable tracing, and `MUSE_MODEL`, `SAM_MODEL` and `MUSE_AGENT_MODEL` must be Standard mode models (the app refuses `*-contributor` IDs, see [Privacy](#privacy)).
+`MODEL_API_KEY` is required for live model calls (not for replay mode). Every data route also requires a signed-in [demo persona session](#authentication-and-rbac): start the backend with `DEMO_SIGN_IN_ENABLED=true`, or just use `scripts/demo.sh` (see [Running the demo](#3-frontend)), which turns it on for its own loopback-only session. `/health` and the persona list stay public. [`.env.example`](.env.example) lists every setting with its default; the Langfuse keys stay empty unless you enable tracing, and `MUSE_MODEL`, `SAM_MODEL` and `MUSE_AGENT_MODEL` must be Standard mode models (the app refuses `*-contributor` IDs, see [Privacy](#privacy)).
 
 ### 2. Backend
 
@@ -221,7 +252,7 @@ Open <http://localhost:3001> (port 3000 is left to the optional local Langfuse).
 Each demo photo has a pinned result in `backend/data/demo/`, named by the hash of the photo. To run the whole demo with no network and no model:
 
 ```bash
-DEMO_MODE=replay .venv/bin/uvicorn app.main:app --port 8000   # from backend/
+DEMO_MODE=replay DEMO_SIGN_IN_ENABLED=true .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000   # from backend/
 ```
 
 In replay mode `POST /scan` answers only from the pinned store (then the cache), `/approve` dispatches with the built-in rules instead of the AI agent (same guard, same audit log), and the dashboard shows a replay banner for the whole session. A photo with no saved result gets a clear message, never an invented one. Outside replay mode a failing model API also falls back to the pinned result for a demo photo (banner included), and an approval whose AI agent fails before acting falls back to the rules.
@@ -259,9 +290,9 @@ It writes to the gitignored `datasets/` folder through the same preprocessing as
 
 1. Take a photo (the rear camera opens on a phone) or choose one from the gallery. Photos must be JPEG, PNG or WebP and at most 10 MB.
 2. The overlay marks every box as OK (green dots, ✓), damaged (red, ✕) or blocking a walkway (red hatch, ⚠ — it pulses once, and not at all with reduced motion); the walkway is a dashed yellow band. Every state also carries a text label.
-3. In the findings panel, untick anything you do not want dispatched. For a damaged box you can enter its SKU so the agent can quarantine stock; nothing in the photo identifies it.
+3. In the findings panel, untick anything you do not want dispatched, or press **Reject: not a real issue** (it is logged as feedback and excluded). Findings flagged **needs review** show why. For a damaged box you can enter its SKU so the agent can quarantine stock; nothing in the photo identifies it.
 4. **Approve & Dispatch** runs the agent once (the button locks, so a double click cannot repeat it). The timeline lists every action with its status, including calls the guard blocked, and links each ticket PDF.
-5. The KPI strip shows scans this session, active (open or in progress) tickets, units in quarantine and walkway hazards in the current scan.
+5. The KPI strip shows scans this session, active (open or in progress) tickets, units in quarantine, walkway hazards in the current scan, and the pipeline agreement and agent score cards (each with its sample size, and a value only once enough reviews or runs exist). Banners say when the session is a replay, when people could not be blurred, and when boxes could not be inspected; the bar under the header always shows "DEMO · unverified" and the signed-in persona.
 
 Steps 1 to 4 need the Floor Manager (or Operations Manager / Admin) persona. Findings are labelled as AI proposals: approving means approving them **for dispatch**; a rejection is stored as review feedback, never as model training or ground truth. Each finding can carry an optional location and instructions for the technician, and a damaged box with a known SKU previews its stock move ("−1 available, +1 quarantine") before you approve.
 
@@ -272,22 +303,41 @@ Steps 1 to 4 need the Floor Manager (or Operations Manager / Admin) persona. Fin
 3. Technician B (or a second browser profile) sees none of Technician A's work; the manager's board shows the full history.
 4. Back as the Floor Manager, the **Shelf count** card under the findings compares the mask count with system stock for a chosen SKU ("Counted 22 · System 25 available · −3"), flags low-confidence counts as needing review, and **Adjust to counted** reconciles once (capped, audited). The **Stock** tab shows the result and a "⚠ Reorder" badge below the reorder point.
 
+## Configuration
+
+Every setting is an environment variable in the git-ignored root `.env`; [`.env.example`](.env.example) lists them all with their defaults (a test keeps the two in sync).
+
+| Area | Settings |
+|---|---|
+| Model API | `MODEL_API_KEY`, `MODEL_API_BASE_URL`, `MUSE_MODEL`, `SAM_MODEL`, `MUSE_AGENT_MODEL` (Standard mode only), `MUSE_REASONING_EFFORT` (default `minimal`), `INSPECT_PROMPT` (`v1`) |
+| Vision | `WALKWAY_CONCEPT` (`yellow line`), `WALKWAY_MIN_CONFIDENCE` (0.6), `REVIEW_CONFIDENCE` (0.6), `PRIVACY_BLUR` (true) |
+| Timeouts and limits | `REQUEST_TIMEOUT_S` (90), `SCAN_TIMEOUT_S` (120), `GUARD_MAX_TOOL_CALLS` (8), `CACHE_TTL_DAYS` (7) |
+| Agent and demo | `AGENT_RUNTIME` (`langchain`, `plain` or `rules`), `DEMO_MODE` (`replay`) |
+| Auth and workflow | `DEMO_SIGN_IN_ENABLED` (false; local demos only), `SESSION_FILE` (`backend/data/sessions.json`), `SESSION_TTL_HOURS` (8), `SESSION_COOKIE_SECURE` (false), `RBAC_USERS_FILE` (`backend/data/users.json`), `RBAC_WAREHOUSE_ID`, `INVENTORY_MAX_ADJUST` (20) |
+| Web | `CORS_ORIGINS` (allowed browser origins, the dashboard on port 3001), `BACKEND_URL` (the frontend's fixed `/api` proxy target, default `http://127.0.0.1:8000`) |
+| Tracing and scores | `LANGFUSE_ENABLED`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `SCORE_MIN_REVIEWS` (5), `SCORE_WEIGHTS` |
+| Evaluation | `MLFLOW_TRACKING_URI` (`sqlite:///data/mlflow/mlflow.db`) |
+
 ## Testing
 
-Unit tests run offline — model calls are faked, so no API key or network is needed.
+Tests run offline: model calls are faked, identity is overridden with a test-only admin, and no key or network is needed.
 
 ```bash
-# Backend (pytest): config, API client, /health + CORS, smoke-test parsers, release versioning script
+# Backend (pytest, about a thousand tests): pipeline, agent and guard, auth, scoring, tracing masks,
+# replay, dataset and CLI scripts, hardening drills, release versioning
 cd backend
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
+.venv/bin/python -m pytest -m rbac        # only the tests that use the real authentication dependency
+RUN_LIVE=1 .venv/bin/python -m pytest -m live   # opt-in checks against the real Meta Model API (never run in CI)
 
-# Frontend (Vitest + React Testing Library): API client, upload, overlay, findings, timeline, dashboard flows
+# Frontend (Vitest + React Testing Library, about 150 tests): API client, upload, overlay, findings,
+# timeline, dashboard flows
 cd frontend
 npm test            # or: npm run test:watch
 ```
 
-The **CI** workflow runs backend tests, frontend lint, tests and production build on every pull request to `master`. The live `scripts.smoke_test` stays a manual check because it calls the real Meta Model API.
+MLflow tests are skipped unless the optional extra is installed (`pip install -r requirements-eval.txt`). The **CI** workflow runs the backend tests (with coverage) and the frontend lint, tests and production build on every pull request and on pushes to `master`. The live `scripts.smoke_test` stays a manual check because it calls the real API.
 
 ## API
 
@@ -320,7 +370,7 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | GET | `/admin/accounts` | ✅ available | Admin only: demo accounts with roles and active status |
 | POST | `/admin/accounts/{user_id}/active` | ✅ available | Admin only: body `{active}`; disabling revokes the account's sessions |
 | GET | `/compliance` | ✅ available | Compliance log |
-| POST | `/scan/{scan_id}/feedback` | ✅ available | Body `{finding_id, action: reject or correct, reason?, corrected_type?}`; appended to `data/feedback.jsonl`. Evaluation data only: it changes no setting or prompt. (The pipeline score on the trace is Phase 6.) |
+| POST | `/scan/{scan_id}/feedback` | ✅ available | Body `{finding_id, action: reject or correct, reason?, corrected_type?}`; appended to `data/feedback.jsonl`. Evaluation data only: it changes no setting or prompt, and it updates the pipeline score. |
 | DELETE | `/scan/{scan_id}` | ✅ available | Purge a cached scan (204). The pinned demo store is out of reach: a demo id is a 404 |
 | GET | `/audit` | ✅ available | Audit log of agent actions, sign-ins, ticket events and reconciles |
 | GET | `/demo` | ✅ available | The demo photos, each with its scan id and whether a saved result exists |
@@ -382,6 +432,15 @@ RBAC_WAREHOUSE_ID=default
 ### Permissions and scope
 
 Authorization combines **role permissions**, **warehouse/area/team scope** and **individual assignment**, and denies by default. Each grant binds one role to a warehouse with optional `area_id` and `team`; scopes from separate grants are never combined. Admin is the explicit global exception, but never bypasses validation, inventory limits, human approval or valid state transitions.
+
+Admins can enable or disable demo accounts on the **Accounts** screen or from the command line (from `backend/`); disabling revokes the account's sessions at once:
+
+```bash
+.venv/bin/python -m scripts.access list
+.venv/bin/python -m scripts.access disable tech-b      # also: enable
+```
+
+The CLI refuses to disable the last active admin unless `--force` is given, so it doubles as the recovery path. Roles and scopes are fixed by the persona seed and cannot be edited at run time.
 
 | Role identifier | Access |
 |---|---|
@@ -460,19 +519,20 @@ gh pr create --base master --fill
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
 - [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
 - [x] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
-- [x] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states. Reject and correct buttons, the replay banner and the score cards arrive with Phases 4 to 6
-- [x] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner (re-run `scripts.freeze_demo` after the Phase 5 privacy blur lands)
+- [x] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states. The reject button, the replay banner and the score cards followed in Phases 4 to 6 (there is no UI for the API's "correct" verdict)
+- [x] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner
 - [x] **Phase 5** — Data handling, privacy and guardrails: shared preprocessing, people blur, retention and purge, agent action guard, audit log, needs-review and feedback flow, dataset preparation and label audit
 - [x] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator with separate pipeline and agent scores (reviewer feedback scores the vision stages, the agent score is automatic), both shown in the dashboard with their sample sizes, MLflow evaluation runs on audited labels
 - [x] **Phase 7** — Hardening: timeouts and retries, prompt-injection regression cases, tracing and evaluation failure drills (an accuracy table on real audited labels is still open: there are none yet)
 - [x] **Phase 8** — Demo prep: final demo freeze, one-command demo start, pre-demo checklist, dataset attribution (the backup video, phone test and rehearsals are manual and not done)
+- [x] **Synthetic dataset** — a generated, labelled, licence-free evaluation set (`scripts.generate_synthetic`)
 - [x] **RBAC and technician workflow** — Local "Sign in as {role}" demo sessions (cookie, CSRF, revocation), scoped role/assignment authorization, ticket assignment, acknowledgement, notes and resolution, in-app notifications, mobile technician workspace and demo account administration (reporter submission and specialist verification are deferred)
 - [x] **Live stock board** — Stock board with low-stock badges, mask-based shelf count with needs-review, guarded once-per-scan reconcile and a damage-to-stock preview
 - [ ] **Later** — Video scans, on-device inference with Muse Glimmer, PPE and spill detection
 
 ## Guardrails, privacy and data handling
 
-AIsleEye treats model output as untrusted, assumes photos may contain people, and expects labels (from models and from datasets) to be wrong sometimes. Items marked 🚧 are the Phase 6 additions.
+AIsleEye treats model output as untrusted, assumes photos may contain people, and expects labels (from models and from datasets) to be wrong sometimes. Items marked 🚧 are planned and not built.
 
 ### Agent guardrails
 
@@ -497,7 +557,7 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 ### Data quality and mislabelled data
 
 - **Needs human review** — findings below `REVIEW_CONFIDENCE` are flagged `needs_review` instead of being presented as certain, as is a damage finding on a box the segmenter itself doubted (the two models disagree). A scan with nothing detected is an explicit "No freight found" result, never a silent pass. Calling out photos that are not a warehouse scene is not built.
-- **Supervisor feedback** — a supervisor can reject a finding in the dashboard (the API also accepts a correction with a type). Feedback is appended to `data/feedback.jsonl`, with the reason length-capped and stripped of markup; nothing is retrained automatically. Turning it into a pipeline score is Phase 6 🚧.
+- **Supervisor feedback** — a supervisor can reject a finding in the dashboard (the API also accepts a correction with a type). Feedback is appended to `data/feedback.jsonl`, with the reason length-capped and stripped of markup; nothing is retrained automatically. It also feeds the pipeline score (see below).
 - **Dataset preprocessing** — `python -m scripts.prepare_dataset SRC --source NAME --license LICENSE [--label ...]` samples images, applies the same preprocessing as uploads, renames files by content hash, drops near-duplicates (difference hash, no new dependency) and writes `datasets/manifest.csv` (file, source, license, label, split). A licence is required. `datasets/` is git-ignored.
 - **Label audit** — `python -m scripts.audit_labels` checks the schema, labels (`damaged`, `intact`, `blocked`, `clear`), splits, licences, that every file exists and matches its hash name, the class balance, and near-duplicates across splits, and writes `datasets/review/issues.csv`. `--with-models` also runs the live pipeline and lists label/model disagreements in `datasets/review/disagreements.csv` for a person to check; `--quarantine FILE...` moves confirmed mislabels to `datasets/quarantine/` and adds them to `datasets/exclusions.txt`, which the evaluation reads. The disagreement run has not been exercised against a real labelled set yet.
 
@@ -515,14 +575,12 @@ All of this is optional: with no Langfuse keys, or MLflow not installed, the app
 
 ## Reliability and interface
 
-Items marked 🚧 are not built yet.
-
-- **Safe state changes** 🚧 — inventory, ticket, compliance, audit, feedback and score files are written atomically (temp file, then rename, with a per-file lock). Approving a scan is idempotent: a repeated or double-clicked request returns the first result and creates no second ticket or inventory change.
+- **Safe state changes** — inventory, ticket, compliance, audit, feedback and score files are written atomically (temp file, then rename, with a per-file lock). Approving a scan is idempotent: a repeated or double-clicked request returns the first result and creates no second ticket or inventory change.
 - **Demo replay** — pre-run results for the demo images live in a pinned store (`backend/data/demo/`) that the retention purge never touches. Replay mode, or an unavailable API, serves them behind a visible "replay" banner; replayed results are never presented as live.
-- **Latency** 🚧 — the target is under 20 seconds for a scan plus approval. In testing, a trivial Muse Spark reply took 13.7 seconds at default reasoning, so inspection and the agent use a low reasoning effort, the SAM calls run concurrently, all crops go in one inspection request, and every stage's time is recorded.
-- **Phone-first** 🚧 — upload takes a photo from the phone camera or the gallery, and narrow screens get a single-column layout with large touch targets.
-- **Accessible overlays** 🚧 — colour is never the only signal: damaged boxes use red with a hatched fill and an icon, blocked walkways a yellow dashed outline and an icon, and every finding has a text label. Nothing flashes, and reduced-motion settings are honoured.
-- **Main states** — nothing detected, API unavailable, replay, people-blur failed, rejected findings and actions rejected by the guard each have an explicit, visible state.
+- **Latency** — the target is under 20 seconds for a scan plus approval. Measured live on the mixed demo photo: about 10 to 13 seconds for the scan and 7 to 9 for the approval, so roughly 20 seconds together, not a guarantee. Inspection and the agent use minimal reasoning, the SAM calls run concurrently, all crops go in one inspection request, and every stage's time is recorded.
+- **Phone-first** — upload takes a photo from the phone camera or the gallery, and narrow screens get a single-column layout with large touch targets. Capture on a real phone over the network is a manual check that has not been done.
+- **Accessible overlays** — colour is never the only signal: damaged boxes use red with a hatched fill and an icon, blocked walkways a yellow dashed outline and an icon, and every finding has a text label. Nothing flashes, and reduced-motion settings are honoured.
+- **Main states** — nothing detected, API unavailable or slow (502 and 504), replay, people-blur failed, rejected findings and actions rejected by the guard each have an explicit, visible state.
 
 ## Datasets
 

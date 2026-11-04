@@ -34,6 +34,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     retention.purge_expired(scan_pipeline.CACHE_DIR, get_settings().cache_ttl_days)
+    if get_settings().demo_sign_in_enabled:
+        logger.warning("DEMO_SIGN_IN_ENABLED is on: anyone who can reach this server can pick any role. Local demos only.")
     observability.init()
     yield
     observability.shutdown()
