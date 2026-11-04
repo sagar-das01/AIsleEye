@@ -247,8 +247,17 @@ def request():
 
 
 @pytest.mark.parametrize("which", ["sam-3.1", "muse-spark-1.3"])
-def test_failure_of_either_model_is_a_502_and_nothing_is_cached(monkeypatch, cache_dir, which):
+def test_a_model_timeout_is_a_504_and_nothing_is_cached(monkeypatch, cache_dir, which):
     err = openai.APITimeoutError(request=request())
+    fakes.install_fake_model(monkeypatch, lambda kw: err if kw["model"] == which else good_handler(kw))
+    res = post(image_bytes())
+    assert res.status_code == 504
+    assert not cache_dir.exists() or list(cache_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("which", ["sam-3.1", "muse-spark-1.3"])
+def test_failure_of_either_model_is_a_502_and_nothing_is_cached(monkeypatch, cache_dir, which):
+    err = openai.InternalServerError("boom", response=httpx.Response(500, request=request()), body=None)
     fakes.install_fake_model(monkeypatch, lambda kw: err if kw["model"] == which else good_handler(kw))
     res = post(image_bytes())
     assert res.status_code == 502

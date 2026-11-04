@@ -29,7 +29,10 @@ export interface FriendlyError {
 
 export function describeError(error: unknown): FriendlyError {
   if (error instanceof ApiError) {
-    if ([502, 503, 504].includes(error.status)) {
+    if (error.status === 504) {
+      return { message: "The analysis took too long. Please try again, or use a smaller photo.", retryable: true };
+    }
+    if ([502, 503].includes(error.status)) {
       return { message: "The analysis service is busy or unavailable. Please try again in a moment.", retryable: true };
     }
     if ([413, 415, 422].includes(error.status)) {

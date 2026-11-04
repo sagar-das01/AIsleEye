@@ -24,11 +24,16 @@ describe("validateUpload", () => {
 });
 
 describe("describeError", () => {
-  it.each([502, 503, 504])("treats HTTP %i as retryable and friendly", (status) => {
+  it.each([502, 503])("treats HTTP %i as retryable and friendly", (status) => {
     const out = describeError(new ApiError("POST /scan failed", status));
     expect(out.retryable).toBe(true);
     expect(out.message).toMatch(/busy or unavailable/);
     expect(out.message).not.toMatch(/\d{3}/);
+  });
+
+  it("explains a timeout (HTTP 504) as taking too long, with a retry", () => {
+    const out = describeError(new ApiError("POST /scan failed", 504));
+    expect(out).toEqual({ message: "The analysis took too long. Please try again, or use a smaller photo.", retryable: true });
   });
 
   it.each([413, 415, 422])("shows the server's reason for HTTP %i and does not offer a retry", (status) => {
