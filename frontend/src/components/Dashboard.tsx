@@ -167,6 +167,19 @@ export function Dashboard() {
             </p>
           )}
 
+          {scan?.privacy === "failed" && (
+            <p role="status" className="rounded-md border border-hazard p-3 text-sm text-hazard">
+              People in this photo could not be blurred, so no photo crops are kept for this scan.
+            </p>
+          )}
+
+          {scan && (scan.uninspected_boxes?.length ?? 0) > 0 && (
+            <p role="status" className="rounded-md border border-hazard p-3 text-sm text-hazard">
+              {scan.uninspected_boxes!.length} box{scan.uninspected_boxes!.length === 1 ? "" : "es"} could not be inspected. Check
+              {scan.uninspected_boxes!.length === 1 ? " it" : " them"} in person.
+            </p>
+          )}
+
           {(phase === "idle" || phase === "scanned" || phase === "approved") && (
             <>
               <UploadPanel busy={false} onFile={(file) => void runScan(file)} />
@@ -189,6 +202,7 @@ export function Dashboard() {
                 pending={phase === "approving"}
                 disabled={phase === "approved" || phase === "scanning"}
                 onApprove={(ids, skus) => void runApprove(ids, skus)}
+                onReject={(id) => void api.rejectFinding(scan.scan_id, id).catch(() => undefined)}
               />
             ) : (
               <p className="mt-3 text-sm text-zinc-500">No scan yet.</p>

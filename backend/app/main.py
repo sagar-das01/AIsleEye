@@ -1,16 +1,20 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import openai
-from fastapi import FastAPI, File, HTTPException, Path, UploadFile
+from fastapi import FastAPI, File, HTTPException, Path, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import replay
+from app import replay, retention
 from app.config import get_settings
+from app.pipeline import scan as scan_pipeline
 from app.pipeline.scan import ALLOWED_MIME_TYPES, InvalidImageError, load_cached, load_image, run_scan, scan_id_for
 from app.replay import load_pinned
 from app.routes_agent import router as agent_router
 from app.routes_demo import router as demo_router
+from app.routes_feedback import router as feedback_router
 from app.schemas import ScanResult
 
 logger = logging.getLogger(__name__)
@@ -20,7 +24,14 @@ SCAN_ID_PATTERN = r"^[0-9a-f]{16}$"
 
 settings = get_settings()
 
-app = FastAPI(title="AIsleEye", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    retention.purge_expired(scan_pipeline.CACHE_DIR, get_settings().cache_ttl_days)
+    yield
+
+
+app = FastAPI(title="AIsleEye", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -29,6 +40,7 @@ app.add_middleware(
 )
 app.include_router(agent_router)
 app.include_router(demo_router)
+app.include_router(feedback_router)
 
 
 @app.get("/health")
@@ -76,3 +88,11 @@ def get_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> ScanResu
     if result is None:
         raise HTTPException(404, "Scan not found.")
     return result
+
+
+@app.delete("/scan/{scan_id}", status_code=204)
+def delete_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> Response:
+    # Only the cache: pinned demo results cannot be deleted through the API.
+    if not retention.delete_scan(scan_id):
+        raise HTTPException(404, "Scan not found.")
+    return Response(status_code=204)

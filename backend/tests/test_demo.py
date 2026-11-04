@@ -12,6 +12,7 @@ import app.audit as audit
 import app.config as config
 from app import main, replay
 from app.agent import rules
+from app.pipeline import preprocess
 from app.pipeline import scan as scan_mod
 from app.schemas import BBox, Finding, ImageSize, ScanResult
 
@@ -51,7 +52,7 @@ def test_demo_photos_are_valid_jpegs_within_the_upload_limits():
         path = replay.demo_image_path(e["id"])
         assert path.stat().st_size < 1_000_000
         with Image.open(path) as img:
-            assert img.format == "JPEG" and max(img.size) <= scan_mod.MAX_SIDE
+            assert img.format == "JPEG" and max(img.size) <= preprocess.MAX_SIDE
 
 
 def test_every_demo_photo_has_a_pinned_result_that_matches_what_it_shows():

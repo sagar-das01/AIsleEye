@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import main
+from app.pipeline import preprocess
 from app.pipeline import scan as scan_mod
 
 W, H = 100, 80
@@ -26,6 +27,8 @@ def image_bytes(fmt="PNG", color=(120, 120, 120), exif=None, size=(W, H)) -> byt
 
 def model_handler(kw):
     if kw["model"] == "sam-3.1":
+        if concept_of(kw) == "person":
+            return sam_line()
         if concept_of(kw) == "cardboard box":
             return sam_line(sam_record(0, 20, 30, 49, 59, w=W, h=H, c=0.95))
         return sam_line(sam_record(0, 0, 50, 99, 59, w=W, h=H, c=0.8))
@@ -61,7 +64,8 @@ def test_scan_success(fake, cache_dir):
     assert by_type["walkway_blocked"]["confidence"] == pytest.approx(0.8)
     assert set(body["timings_ms"]) >= {"segment", "inspect", "hazards"}
     assert (cache_dir / f"{body['scan_id']}.json").is_file()
-    assert len(fake.calls) == 3  # two SAM concepts + one Muse inspection
+    assert len(fake.calls) == 4  # three SAM concepts (box, walkway, person) + one Muse inspection
+    assert body["privacy"] == "blurred" and body["uninspected_boxes"] == []
 
 
 def test_scan_cache_replay(fake):
@@ -145,6 +149,6 @@ def test_exif_stripped_and_orientation_applied(fake):
 
 
 def test_large_image_downscaled(fake, monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_SIDE", 50)
+    monkeypatch.setattr(preprocess, "MAX_SIDE", 50)
     img = scan_mod.load_image(image_bytes(), "image/png")
     assert max(img.size) == 50

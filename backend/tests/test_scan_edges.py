@@ -13,6 +13,7 @@ from spec_support import need
 
 main = need("app.main", "app")
 scan_mod = need("app.pipeline.scan", "load_image", "run_scan", "CACHE_DIR")
+from app.pipeline import preprocess  # noqa: E402
 fakes = need("fakes", "install_fake_model", "sam_record", "sam_line", "concept_of")
 
 W, H = 100, 80
@@ -128,7 +129,7 @@ def test_default_upload_limit_is_ten_megabytes():
 
 
 def test_pixel_bomb_is_rejected_before_any_model_call(fake, monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_PIXELS", W * H - 1)
+    monkeypatch.setattr(preprocess, "MAX_PIXELS", W * H - 1)
     res = post(image_bytes())
     assert res.status_code == 422 and "too large" in res.json()["detail"].lower()
     assert fake.calls == []
@@ -141,7 +142,7 @@ def test_pillow_decompression_bomb_guard_is_mapped_to_422(fake, monkeypatch):
 
 
 def test_exact_pixel_limit_is_allowed(fake, monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_PIXELS", W * H)
+    monkeypatch.setattr(preprocess, "MAX_PIXELS", W * H)
     assert post(image_bytes()).status_code == 200
 
 
@@ -154,7 +155,7 @@ def test_client_supplied_filename_is_never_used_for_storage(fake, tmp_path, cach
 # ---- processing -----------------------------------------------------------------------------------------------
 
 def test_downscaled_photo_keeps_every_coordinate_inside_the_reported_size(fake, monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_SIDE", 50)
+    monkeypatch.setattr(preprocess, "MAX_SIDE", 50)
     body = post(image_bytes(size=(200, 100))).json()
     w, h = body["image_size"]["width"], body["image_size"]["height"]
     assert (w, h) == (50, 25)
@@ -167,12 +168,12 @@ def test_downscaled_photo_keeps_every_coordinate_inside_the_reported_size(fake, 
 
 
 def test_image_exactly_at_the_side_limit_is_not_resized(fake, monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_SIDE", 100)
+    monkeypatch.setattr(preprocess, "MAX_SIDE", 100)
     assert post(image_bytes(size=(100, 60))).json()["image_size"] == {"width": 100, "height": 60}
 
 
 def test_portrait_and_landscape_both_downscale_proportionally(monkeypatch):
-    monkeypatch.setattr(scan_mod, "MAX_SIDE", 40)
+    monkeypatch.setattr(preprocess, "MAX_SIDE", 40)
     assert scan_mod.load_image(image_bytes(size=(80, 160)), "image/png").size == (20, 40)
     assert scan_mod.load_image(image_bytes(size=(160, 80)), "image/png").size == (40, 20)
 

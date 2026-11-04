@@ -113,6 +113,32 @@ describe("Dashboard: scanning", () => {
     expect(screen.getByText("No damage or blocked walkways found.")).toBeDefined();
   });
 
+  it("warns when people could not be blurred, and when boxes could not be inspected", async () => {
+    scan.mockResolvedValue(makeScan({ privacy: "failed", uninspected_boxes: ["box_1", "box_2"] }));
+    await upload();
+    expect(await screen.findByText(/could not be blurred, so no photo crops are kept/)).toBeDefined();
+    expect(screen.getByText(/2 boxes could not be inspected\. Check\s+them in person/)).toBeDefined();
+  });
+
+  it("stays quiet about privacy and inspection when both went fine", async () => {
+    scan.mockResolvedValue(makeScan({ privacy: "blurred", uninspected_boxes: [] }));
+    await upload();
+    await screen.findByText("Damaged box");
+    expect(screen.queryByText(/could not be blurred/)).toBeNull();
+    expect(screen.queryByText(/could not be inspected/)).toBeNull();
+  });
+
+  it("sends a rejection to the feedback log and keeps working if that fails", async () => {
+    const reject = vi.spyOn(api, "rejectFinding").mockRejectedValue(new Error("offline"));
+    const result = makeScan();
+    scan.mockResolvedValue(result);
+    await upload();
+    fireEvent.click((await screen.findAllByRole("button", { name: /Reject: not a real issue/ }))[0]);
+    expect(reject).toHaveBeenCalledExactlyOnceWith(result.scan_id, result.findings[0].id);
+    expect(await screen.findByText(/Rejected: not a real issue/)).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("allows scanning another photo afterwards and replaces the old results", async () => {
     await upload();
     await screen.findByText("Damaged box");
