@@ -233,6 +233,17 @@ In replay mode `POST /scan` answers only from the pinned store (then the cache),
 
 Re-freeze whenever preprocessing, the walkway settings or the thresholds change.
 
+**Synthetic evaluation dataset**
+
+Real photos are often licence-restricted, so you can generate a labelled, licence-free set instead (CC0, drawn in the repo):
+
+```bash
+.venv/bin/python -m scripts.generate_synthetic --count 25   # per class: damaged, intact, blocked, clear
+.venv/bin/python -m scripts.audit_labels                    # then evaluate with scripts.evaluate as usual
+```
+
+It writes to the gitignored `datasets/` folder through the same preprocessing as an upload. Each image carries one label: damaged / intact scenes keep the walkway clear and blocked / clear scenes use undamaged boxes, so the label is unambiguous. Runs are seeded (`--seed`, `--out`, `--classes`) and re-running adds nothing new. The scenes are cartoon-style, so they test the pipeline, not real-world accuracy.
+
 **Using the dashboard**
 
 1. Take a photo (the rear camera opens on a phone) or choose one from the gallery. Photos must be JPEG, PNG or WebP and at most 10 MB.
