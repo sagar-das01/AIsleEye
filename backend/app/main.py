@@ -5,11 +5,12 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 import openai
-from fastapi import FastAPI, File, HTTPException, Path, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Path, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import observability, replay, retention
 from app.config import get_settings
+from app.auth import CurrentUser, Permission, has_permission, require_permission
 from app.pipeline import scan as scan_pipeline
 from app.pipeline.scan import ALLOWED_MIME_TYPES, InvalidImageError, load_cached, load_image, run_scan, scan_id_for
 from app.replay import load_pinned
@@ -57,11 +58,19 @@ def health() -> dict:
     }
 
 
+@app.get("/me")
+def me(user: CurrentUser) -> dict:
+    return {
+        **user.model_dump(mode="json"),
+        "permissions": [permission.value for permission in Permission if has_permission(user, permission)],
+    }
+
+
 def _replayed(result: ScanResult) -> ScanResult:
     return result.model_copy(update={"replay": True})
 
 
-@app.post("/scan", response_model=ScanResult)
+@app.post("/scan", response_model=ScanResult, dependencies=[Depends(require_permission(Permission.SCAN))])
 async def scan(image: Annotated[UploadFile, File()]) -> ScanResult:
     if image.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(415, "Only JPEG, PNG or WebP images are supported.")
@@ -94,7 +103,7 @@ def _fallback_or_raise(data: bytes, status: int, message: str) -> ScanResult:
     raise HTTPException(status, message) from None
 
 
-@app.get("/scan/{scan_id}", response_model=ScanResult)
+@app.get("/scan/{scan_id}", response_model=ScanResult, dependencies=[Depends(require_permission(Permission.REVIEW))])
 def get_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> ScanResult:
     result = replay.find_scan(scan_id)
     if result is None:
@@ -102,7 +111,7 @@ def get_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> ScanResu
     return result
 
 
-@app.delete("/scan/{scan_id}", status_code=204)
+@app.delete("/scan/{scan_id}", status_code=204, dependencies=[Depends(require_permission(Permission.DELETE_SCAN))])
 def delete_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> Response:
     # Only the cache: pinned demo results cannot be deleted through the API.
     if not retention.delete_scan(scan_id):

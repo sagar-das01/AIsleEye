@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     # The frontend runs on 3001 because local Langfuse uses 3000.
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""
+    rbac_users_file: Path = DATA_DIR / "access.json"
+    rbac_warehouse_id: str = Field("default", min_length=1, max_length=100)
+
     agent_runtime: Literal["langchain", "plain", "rules"] = "langchain"
     demo_mode: Literal["", "replay"] = ""
     privacy_blur: bool = True
@@ -52,6 +58,11 @@ class Settings(BaseSettings):
     score_min_reviews: int = Field(5, ge=1)
     score_weights: dict[str, float] = {"validity": 0.4, "guard_clean": 0.4, "within_cap": 0.2}
     mlflow_tracking_uri: str = "sqlite:///data/mlflow/mlflow.db"
+
+    @field_validator("rbac_users_file")
+    @classmethod
+    def _anchor_access_file(cls, value: Path) -> Path:
+        return value if value.is_absolute() else ROOT_DIR / value
 
     @model_validator(mode="after")
     def _standard_mode_models_only(self) -> "Settings":

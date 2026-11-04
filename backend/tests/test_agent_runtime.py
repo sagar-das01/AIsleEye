@@ -227,7 +227,10 @@ def test_approving_a_scan_produces_a_pdf_an_inventory_delta_and_a_compliance_ent
     [ticket] = client.get("/tickets").json()
     pdf = client.get(ticket["pdf_url"])
     assert pdf.headers["content-type"] == "application/pdf" and pdf.content.startswith(b"%PDF")
-    assert [e["outcome"] for e in client.get("/audit").json()] == ["executed"] * 3
+    entries = client.get("/audit").json()
+    assert entries[0]["tool"] == "authorize:approve"
+    assert entries[0]["arguments"]["actor_id"] == "test-admin"
+    assert [e["outcome"] for e in entries] == ["executed"] * 4
     assert "pdf_path" not in json.dumps(body) and str(data) not in json.dumps(body)
 
 

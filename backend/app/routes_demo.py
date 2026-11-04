@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import FileResponse
 
 from app import replay
+from app.auth import Permission, require_permission
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_permission(Permission.SCAN))])
 
 
 @router.get("/demo")

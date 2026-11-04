@@ -1,15 +1,16 @@
 import logging
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from app import feedback, replay, scoring
+from app.auth import Permission, require_permission
 from app.pipeline.inspect import prompt_version
 from app.schemas import FindingType
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_permission(Permission.REVIEW))])
 
 SCAN_ID_PATTERN = r"^[0-9a-f]{16}$"
 
