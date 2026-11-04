@@ -8,3 +8,5 @@ backend/data/smoke/
 backend/data/cache/
 .coverage
 htmlcov/
+
+infra/langfuse/.env

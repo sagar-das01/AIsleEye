@@ -12,6 +12,9 @@ if not LIVE:
         MUSE_MODEL="muse-spark-1.3",
         SAM_MODEL="sam-3.1",
         CORS_ORIGINS='["http://localhost:3000"]',
+        LANGFUSE_ENABLED="false",
+        LANGFUSE_PUBLIC_KEY="",
+        LANGFUSE_SECRET_KEY="",
     )
 
 from app.clients import get_async_client, get_client  # noqa: E402

@@ -179,6 +179,17 @@ python3 -m venv .venv
 
 The smoke test prints `PASS`, `FAIL` or `SKIP` (an optional integration that is not configured) per capability and saves raw outputs and `report.json` to `backend/data/smoke/`. Without `--image` it renders a synthetic scene.
 
+#### Local Langfuse (optional)
+
+Traces stay on your machine when you run Langfuse yourself. With Docker running:
+
+```bash
+scripts/langfuse-local.sh up       # pulls missing images, starts the stack, writes the keys to your .env
+scripts/langfuse-local.sh status   # down | logs | reset (reset also deletes the data volumes)
+```
+
+The stack is defined in [`infra/langfuse/docker-compose.yml`](infra/langfuse/docker-compose.yml): Langfuse web and worker, Postgres, ClickHouse, Redis and MinIO. Secrets are generated into the git-ignored `infra/langfuse/.env`, every published port is bound to `127.0.0.1`, telemetry is off and sign-up is closed. The UI is at http://localhost:3000 (login `admin@aisleeye.local`, password in `infra/langfuse/.env`); the script sets `LANGFUSE_ENABLED`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and `LANGFUSE_BASE_URL` in the root `.env`, and the smoke test's Langfuse check then sends one LangChain trace. This Langfuse version only accepts OpenTelemetry traces, so the legacy `/api/public/traces` endpoint is unavailable; use the UI or `/api/public/v2/observations`.
+
 #### What the live smoke test established
 
 | Question | Answer |
@@ -312,7 +323,7 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 
 ### Privacy
 
-- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. In Standard mode (`muse-spark-1.3`, `sam-3.1`, `muse-wonder-1.0`) Meta states that prompts, files and responses are not used to train its models; the `*-contributor` Muse Spark variants are cheaper in exchange for allowing exactly that, so the app refuses them. Check the current [data terms](https://dev.meta.ai/docs/pricing-rate-limits#pricing-modes) before using real facility photos. If Langfuse Cloud is enabled 🚧, prompts, model outputs, tool arguments and scores also go to Langfuse, a third-party processor, but never images (see below); self-hosting is the alternative.
+- **What leaves your machine** — the preprocessed photo is sent to the Meta Model API for inference. In Standard mode (`muse-spark-1.3`, `sam-3.1`, `muse-wonder-1.0`) Meta states that prompts, files and responses are not used to train its models; the `*-contributor` Muse Spark variants are cheaper in exchange for allowing exactly that, so the app refuses them. Check the current [data terms](https://dev.meta.ai/docs/pricing-rate-limits#pricing-modes) before using real facility photos. Tracing runs against a local, self-hosted Langfuse by default (`LANGFUSE_BASE_URL=http://localhost:3000`), so prompts, model outputs, tool arguments and scores stay on this machine and never go to a third party; images are never traced either (see below). Pointing `LANGFUSE_BASE_URL` at Langfuse Cloud would send those texts to a third-party processor.
 - **Cost and limits** — pay-as-you-go prices from the [pricing page](https://dev.meta.ai/docs/pricing-rate-limits): SAM 3.1 $2.50 per 1,000 images (a scan makes two calls, about $0.005); `muse-spark-1.3` $1.25 per million input and $4.25 per million output tokens. A scan with a handful of crops at minimal reasoning is roughly two to three cents; measure it from `usage` once real photos run. Limits per team: 3,000 requests per minute for `sam-3.1` and `muse-spark-1.3` (4 M tokens per minute for Muse). The client retries 429s and 5xx responses twice.
 - **Metadata** — uploads are size- and type-limited, stripped of EXIF (GPS, device) and downscaled.
 - **People** 🚧 — people are segmented (`person`) and blurred before anything is cached, cropped into a ticket PDF or passed to later model calls. The detection pass itself sees the unblurred image, so blurring protects stored data and later stages, not that first call. If the pass fails, crops are left out of tickets and the scan is flagged.
@@ -332,7 +343,7 @@ AIsleEye treats model output as untrusted, assumes photos may contain people, an
 All of this is planned (Phase 6) and optional: with no Langfuse keys, or MLflow not installed, the app, the agent and the offline tests behave exactly as before.
 
 - **Tracing** 🚧 — [Langfuse](https://langfuse.com) records one trace per scan: preprocessing, each SAM call, inspection batches, the hazard check, the agent run, every tool call and every guard verdict. Tracing is a no-op when unconfigured or unreachable and never fails a scan or an agent run.
-- **No images in traces** 🚧 — masking at the Langfuse client drops image URLs, base64 payloads and crop bytes before export, and an offline test fails if any exported span contains one. Langfuse Cloud is a third-party processor for prompts, outputs, tool arguments and scores; self-hosting is the alternative.
+- **No images in traces** 🚧 — masking at the Langfuse client drops image URLs, base64 payloads and crop bytes before export, and an offline test fails if any exported span contains one. Langfuse runs locally by default, so nothing is sent to a third party; if you point it at Langfuse Cloud, that service becomes a processor for prompts, outputs, tool arguments and scores.
 - **Central orchestrator** 🚧 — the single entry point for an approved scan: it runs the LangChain agent, sends every proposed tool call through the action guard, closes the trace and scores the run. If LangChain misbehaves against the Meta Model API (which supports only automatic tool choice), `AGENT_RUNTIME=plain` runs a hand-written loop with the same tools.
 - **Scoring** 🚧 — two separate scores, because the supervisor's review happens before the agent runs. The **pipeline score** comes from that review (`pipeline_human_agreement`: approved ÷ reviewed findings, where a correction counts as a miss) and judges segmentation and inspection. The **agent score** is automatic (tool-call validity, guard rejections, staying within the iteration cap; latency and tokens are recorded alongside), and an optional post-dispatch rating of the created tickets can be blended in later 🚧. Each score appears in the dashboard with its sample size, and only after a minimum number of reviews or runs. Scores are stored locally in `scores.jsonl` and mirrored to the scan's trace in Langfuse. Scoring is report-only: it never changes prompts, tools or permissions automatically.
 - **Offline evaluation** 🚧 — MLflow tracks evaluation runs on the audited label set: prompt version, model names and thresholds as parameters; damage precision and recall, hazard accuracy, needs-review rate, latency and tokens as metrics; pipeline agreement and agent score per prompt version for comparison. MLflow is used for evaluation only (live traces stay in Langfuse and MLflow's LangChain autolog stays off, so nothing is traced twice) and ships as an optional extra (`requirements-eval.txt`).

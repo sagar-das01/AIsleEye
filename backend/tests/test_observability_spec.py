@@ -22,8 +22,10 @@ BLOB = base64.b64encode(os.urandom(3000)).decode()
 
 @pytest.fixture(autouse=True)
 def no_langfuse_env(monkeypatch):
-    for var in ("LANGFUSE_ENABLED", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"):
-        monkeypatch.delenv(var, raising=False)
+    # Empty real env vars beat any Langfuse keys in the developer's local .env file.
+    for var in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("LANGFUSE_ENABLED", "false")
 
 
 # ---- masking: no image data may ever leave the machine in a trace ----------------------------------------------
