@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, ApiError, type Ticket } from "@/lib/api";
 import { makeTicket } from "@/test-sessions";
 
+import { POLL_MS } from "./NotificationBell";
 import { TechnicianWorkspace, TicketBoard } from "./TicketQueues";
 
 const NEW = makeTicket();
@@ -34,6 +35,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const tab = (name: RegExp) => screen.getByRole("tab", { name });
@@ -132,3 +134,19 @@ describe("TicketBoard", () => {
     expect(within(form).getByLabelText("Reason for reassigning")).toBeDefined();
   });
 });
+
+describe("Live updates", () => {
+  it("shows work assigned elsewhere without a manual refresh, by polling and on refocus", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    tickets = [];
+    render(<TechnicianWorkspace />);
+    expect(await screen.findByText("No new tickets assigned to you.")).toBeDefined();
+    tickets = [NEW];
+    await act(async () => vi.advanceTimersByTime(POLL_MS));
+    expect(await screen.findByText("Damaged box needs inspection")).toBeDefined();
+    tickets = [NEW, makeTicket({ ticket_id: "T-5", title: "Second job" })];
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(await screen.findByText("Second job")).toBeDefined();
+  });
+});
+

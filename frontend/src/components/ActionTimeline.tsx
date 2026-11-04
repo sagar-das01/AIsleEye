@@ -1,3 +1,4 @@
+import { STATUS_LABEL } from "@/components/TicketDetail";
 import { type ActionRecord, type ApproveResult, type ActionStatus, pdfUrl } from "@/lib/api";
 import { summarizeArgs } from "@/lib/scan";
 
@@ -18,6 +19,24 @@ export function ActionTimeline({ result }: { result: ApproveResult }) {
   const ticketById = new Map(result.tickets.map((t) => [t.ticket_id, t]));
   return (
     <div className="mt-3 flex flex-col gap-3">
+      {result.already_dispatched && (
+        <div role="status" aria-label="Already dispatched" className="rounded-md border border-hazard p-3 text-sm text-hazard">
+          <p>
+            ⟲ These findings were already dispatched
+            {result.approved_at ? ` at ${new Date(result.approved_at).toLocaleString()}` : ""}, and those tickets are still active, so no new
+            tickets were created. Showing the earlier result with each ticket&apos;s current status:
+          </p>
+          {result.tickets.length > 0 && (
+            <ul className="mt-2 text-xs text-zinc-300">
+              {result.tickets.map((t) => (
+                <li key={t.ticket_id}>
+                  <span className="font-mono">{t.ticket_id}</span> · {STATUS_LABEL[t.status] ?? t.status}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {result.actions.length === 0 && <p className="text-sm text-zinc-400">The agent took no actions.</p>}
       <ol className="flex flex-col gap-2">
         {result.actions.map((action, i) => (

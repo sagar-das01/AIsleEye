@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { POLL_MS } from "@/components/NotificationBell";
 import { TicketDetail, STATUS_LABEL } from "@/components/TicketDetail";
 import { api, type Ticket } from "@/lib/api";
 import { describeError, SEVERITY_ICON } from "@/lib/scan";
@@ -65,6 +66,21 @@ function TicketQueue({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- (re)load when the parent signals a change
     void load();
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    // Work assigned from another browser or by another person shows up without a manual refresh, like the bell.
+    const timer = setInterval(() => void load(), POLL_MS);
+    const refresh = () => document.visibilityState === "visible" && void load();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load]);
 
   useEffect(() => {
     if (!selectedId) return;
