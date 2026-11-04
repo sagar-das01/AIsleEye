@@ -355,3 +355,24 @@ describe("Dashboard: demo photos and replay", () => {
     expect(await screen.findByText(/built-in rules dispatched these actions/)).toBeDefined();
   });
 });
+
+describe("Dashboard: correcting findings", () => {
+  it("saves a correction and redraws the list and overlay from the reviewed scan", async () => {
+    const reviewed = makeScan({
+      findings: [
+        { ...makeScan().findings[0], type: "walkway_blocked", description: "Sits on the lane.", review_status: "corrected",
+          original: { type: "box_damage", severity: "high", description: "Box box_0: crushed corner." } },
+        makeScan().findings[1],
+      ],
+    });
+    const correctFinding = vi.spyOn(api, "correctFinding").mockResolvedValue(reviewed);
+    await upload();
+    fireEvent.click((await screen.findAllByRole("button", { name: /Correct this finding/ }))[0]);
+    fireEvent.change(screen.getByLabelText("Finding type"), { target: { value: "walkway_blocked" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+    expect(await screen.findByText("✎ Corrected by supervisor")).toBeDefined();
+    expect(correctFinding).toHaveBeenCalledWith("0123456789abcdef", "dmg_box_0", expect.objectContaining({ type: "walkway_blocked" }));
+    expect(screen.getByTestId("object-box_0").getAttribute("data-state")).toBe("blocked");
+  });
+});
+

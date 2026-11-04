@@ -22,6 +22,8 @@ PROTECTED = [
     ("POST", "/scan"), ("GET", "/scan/0123456789abcdef"), ("DELETE", "/scan/0123456789abcdef"),
     ("POST", "/scan/0123456789abcdef/approve"), ("POST", "/scan/0123456789abcdef/feedback"),
     ("GET", "/scan/0123456789abcdef/count"), ("POST", "/scan/0123456789abcdef/reconcile"),
+    ("PUT", "/scan/0123456789abcdef/findings/dmg_box_1"), ("POST", "/scan/0123456789abcdef/findings"),
+    ("DELETE", "/scan/0123456789abcdef/findings/dmg_box_1/review"),
 ]
 
 
@@ -249,6 +251,8 @@ def test_role_matrix_on_read_endpoints(world, persona, allowed):
 @pytest.mark.parametrize(("method", "path"), [
     ("POST", "/scan"), ("POST", "/scan/0123456789abcdef/approve"), ("POST", "/scan/0123456789abcdef/feedback"),
     ("DELETE", "/scan/0123456789abcdef"), ("POST", "/scan/0123456789abcdef/reconcile"),
+    ("PUT", "/scan/0123456789abcdef/findings/dmg_box_1"), ("POST", "/scan/0123456789abcdef/findings"),
+    ("DELETE", "/scan/0123456789abcdef/findings/dmg_box_1/review"),
 ])
 def test_non_managers_cannot_mutate_operations(world, persona, method, path):
     assert sign_in(persona).request(method, path, json={}).status_code == 403

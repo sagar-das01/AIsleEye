@@ -354,7 +354,8 @@ def run_approved_scan(
             "executed": sum(a.status == "executed" for a in executor.actions), "actions": len(executor.actions),
             "iterations": result.iterations, "within_iteration_cap": result.within_iteration_cap, "fallback": result.fallback,
         })
-    _record_scores(scan.scan_id, approved, result, executor, settings)
+    corrected = frozenset(f.id for f in scan.findings if f.review_status != "proposed")
+    _record_scores(scan.scan_id, approved, result, executor, settings, corrected)
     return result
 
 
@@ -370,7 +371,9 @@ def _trusted_context(scan: ScanResult, details: dict[str, dict]) -> dict[str, di
     }
 
 
-def _record_scores(scan_id: str, approved: list[str], result: RunResult, executor: _Executor, settings) -> None:
+def _record_scores(
+    scan_id: str, approved: list[str], result: RunResult, executor: _Executor, settings, corrected: frozenset[str] = frozenset(),
+) -> None:
     """Automatic agent scores and the pipeline score for the approved findings. Scoring never fails a run."""
     try:
         proposed = len(executor.actions)
@@ -390,8 +393,10 @@ def _record_scores(scan_id: str, approved: list[str], result: RunResult, executo
             if result.tokens:
                 scores["tokens_in"], scores["tokens_out"] = result.tokens["in"], result.tokens["out"]
         scoring.record_scores(scan_id, scores, prompt_version=PROMPT_VERSION, extra={"runtime": result.runtime})
-        if approved:
-            scoring.update_pipeline_review(scan_id, {fid: "approve" for fid in approved}, prompt_version=inspect_prompt_version())
+        # Only untouched model proposals count as agreement; corrections are scored as misses when they are made.
+        accepted = [fid for fid in approved if fid not in corrected]
+        if accepted:
+            scoring.update_pipeline_review(scan_id, {fid: "approve" for fid in accepted}, prompt_version=inspect_prompt_version())
     except Exception:
         logger.exception("Could not record scores")
 

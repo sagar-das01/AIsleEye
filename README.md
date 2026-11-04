@@ -137,6 +137,7 @@ Every data route sits behind authentication and role-based access control (see [
 │   │   ├── personas.py          # seeded demo personas and admin-controlled active flags
 │   │   ├── sessions.py          # opaque demo sessions (token digests only)
 │   │   ├── workflow.py          # ticket store: assignment, lifecycle events, notifications, legacy migration
+│   │   ├── annotations.py       # supervisor corrections, added and rejected findings, kept apart from model output
 │   │   ├── pipeline/            # preprocess, privacy (blur), segment (SAM), inspect (Muse), hazards, scan orchestration
 │   │   ├── agent/               # orchestrator (LangChain agent), tools, built-in rules dispatcher
 │   │   ├── guard.py             # action guard between the agent and the tools
@@ -155,7 +156,7 @@ Every data route sits behind authentication and role-based access control (see [
 │   │                            #   generate_synthetic, audit_labels, evaluate, access (see below)
 │   ├── data/
 │   │   ├── demo/                # pinned demo results (tracked; the purge never touches them)
-│   │   ├── inventory.seed.json  # starting stock, copied to inventory.json on first use
+│   │   ├── inventory.seed.json  # 18 SKUs with names and reorder points, copied to inventory.json on first use
 │   │   └── ...                  # runtime files, git-ignored (cache, tickets, approvals, sessions, users, logs, mlflow)
 │   ├── tests/                   # pytest suite (offline)
 │   └── requirements*.txt        # runtime, dev (tests) and eval (MLflow) dependencies
@@ -294,6 +295,8 @@ It writes to the gitignored `datasets/` folder through the same preprocessing as
 4. **Approve & Dispatch** runs the agent once (the button locks, so a double click cannot repeat it). The timeline lists every action with its status, including calls the guard blocked, and links each ticket PDF.
 5. The KPI strip shows scans this session, active (open or in progress) tickets, units in quarantine, walkway hazards in the current scan, and the pipeline agreement and agent score cards (each with its sample size, and a value only once enough reviews or runs exist). Banners say when the session is a replay, when people could not be blurred, and when boxes could not be inspected; the bar under the header always shows "DEMO · unverified" and the signed-in persona.
 
+If the model got a finding wrong, **✎ Correct this finding** changes its type, severity or description (the model's version stays visible as "Model proposed: …"), and **＋ Add a finding the model missed** marks damage or a walkway blockage on one of the numbered boxes in the photo. The corrected version is what the overlay shows and what gets dispatched; corrections can be undone until a finding is dispatched, after which it is locked. Corrections and additions are logged as review feedback (`correct` / `missed`) for evaluation, never as ground truth or training data.
+
 Steps 1 to 4 need the Floor Manager (or Operations Manager / Admin) persona. Findings are labelled as AI proposals: approving means approving them **for dispatch**; a rejection is stored as review feedback, never as model training or ground truth. Each finding can carry an optional location and instructions for the technician, and a damaged box with a known SKU previews its stock move ("−1 available, +1 quarantine") before you approve.
 
 **Technician and stock walkthrough (about 60 s, after step 4)**
@@ -355,7 +358,7 @@ MLflow tests are skipped unless the optional extra is installed (`pip install -r
 | GET | `/scan/{scan_id}/count` | ✅ available | Box count from the scan's own masks (`exclude_damaged` default true) with a `needs_review` flag for low-confidence or uninspected boxes |
 | POST | `/scan/{scan_id}/reconcile` | ✅ available | Body `{sku, exclude_damaged?, confirm_needs_review?}`. Sets available stock to the mask count: capped by `INVENTORY_MAX_ADJUST`, once per SKU per scan (a repeat returns the first result), audited whether executed or rejected |
 | GET | `/inventory` | ✅ available | Current inventory, including quarantine (`reorder_point` appears when set) |
-| GET | `/inventory/board` | ✅ available | Stock board rows: available, quarantine, total, reorder point (default 10) and `low_stock` |
+| GET | `/inventory/board` | ✅ available | Stock board rows: SKU, product name, available, quarantine, total, reorder point (default 10) and `low_stock` |
 | GET | `/tickets` | ✅ available | Tickets filtered by role, scope and personal assignment; optional `status=open,in_progress,resolved,active` and `mine=true`. Each row carries its `capabilities` for the caller |
 | GET | `/tickets/{ticket_id}` | ✅ available | One authorized ticket with its current `version` |
 | GET | `/tickets/{ticket_id}/history` | ✅ available | Lifecycle events (created, assigned, reassigned, acknowledged, note, resolved) |
@@ -371,6 +374,9 @@ MLflow tests are skipped unless the optional extra is installed (`pip install -r
 | POST | `/admin/accounts/{user_id}/active` | ✅ available | Admin only: body `{active}`; disabling revokes the account's sessions |
 | GET | `/compliance` | ✅ available | Compliance log |
 | POST | `/scan/{scan_id}/feedback` | ✅ available | Body `{finding_id, action: reject or correct, reason?, corrected_type?}`; appended to `data/feedback.jsonl`. Evaluation data only: it changes no setting or prompt, and it updates the pipeline score. |
+| PUT | `/scan/{scan_id}/findings/{finding_id}` | ✅ available | Body `{type, severity, description, reason?}`. Supervisor correction of a model finding; returns the reviewed scan. Stored apart from the model output (which keeps its original values under `original`), logged as `correct` feedback and scored as a miss. Refused with `409` once that finding was dispatched |
+| POST | `/scan/{scan_id}/findings` | ✅ available | Body `{object_id, type, severity, description, reason?}`. Adds a finding the model missed on one of its detected boxes (201, reviewed scan); logged as `missed` feedback |
+| DELETE | `/scan/{scan_id}/findings/{finding_id}/review` | ✅ available | Undo a correction or rejection, or remove a supervisor-added finding |
 | DELETE | `/scan/{scan_id}` | ✅ available | Purge a cached scan (204). The pinned demo store is out of reach: a demo id is a 404 |
 | GET | `/audit` | ✅ available | Audit log of agent actions, sign-ins, ticket events and reconciles |
 | GET | `/demo` | ✅ available | The demo photos, each with its scan id and whether a saved result exists |
@@ -392,11 +398,15 @@ All data endpoints require a demo session cookie; only `/health`, `/auth/demo-pe
   "description": "string",
   "sku": "optional string",
   "needs_review": false,
-  "review_reason": "optional string"
+  "review_reason": "optional string",
+  "review_status": "proposed | corrected | added | rejected",
+  "original": { "type": "...", "severity": "...", "description": "..." },
+  "review_note": "optional string",
+  "object_id": "optional string (supervisor-added findings)"
 }
 ```
 
-`needs_review` and `review_reason` flag a finding for a person instead of presenting it as certain. A scan result also carries `privacy` (`off`, `blurred` or `failed`) and `uninspected_boxes`, the boxes the inspection gave no verdict on.
+`needs_review` and `review_reason` flag a finding for a person instead of presenting it as certain. `review_status` says whether a finding is the model's untouched proposal or a supervisor decision; `original` holds what the model proposed before a correction. `GET /scan/{id}`, `/scan`, `/count` and `/approve` all use this reviewed view, while the cached model output and the pinned demo store are never modified. A scan result also carries `privacy` (`off`, `blurred` or `failed`) and `uninspected_boxes`, the boxes the inspection gave no verdict on.
 
 ## Authentication and RBAC
 

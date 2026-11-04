@@ -50,7 +50,7 @@ def reconcile(**body):
 
 def test_board_rows_have_totals_and_low_stock_with_a_default_reorder_point(world):
     rows = {r["sku"]: r for r in client.get("/inventory/board").json()}
-    assert rows["SKU-1042"] == {"sku": "SKU-1042", "available": 25, "quarantine": 0, "total": 25, "reorder_point": 24, "low_stock": False}
+    assert rows["SKU-1042"] == {"sku": "SKU-1042", "name": None, "available": 25, "quarantine": 0, "total": 25, "reorder_point": 24, "low_stock": False}
     assert rows["SKU-OLD"]["reorder_point"] == tools.DEFAULT_REORDER_POINT and rows["SKU-OLD"]["low_stock"] is True
     assert client.get("/inventory").json()["SKU-OLD"] == {"available": 3, "quarantine": 1}  # legacy shape untouched
 
@@ -157,3 +157,15 @@ def test_approval_details_reach_the_ticket_and_the_model_cannot_set_them(world, 
     assert (ticket["location"], ticket["instructions"], ticket["sku"], ticket["finding_type"]) == (
         "Aisle 4", "Rewrap", "SKU-1042", "box_damage",
     )
+
+
+def test_seed_inventory_is_varied_valid_and_covers_the_demo_photos():
+    seed = json.loads(tools.SEED_INVENTORY.read_text())
+    assert len(seed) >= 15
+    for sku, item in seed.items():
+        assert sku.startswith("SKU-") and item["name"] and item["quarantine"] == 0
+        assert item["available"] >= 0 and item["reorder_point"] > 0
+    assert any(i["available"] < i["reorder_point"] for i in seed.values())  # the reorder badge shows out of the box
+    manifest = json.loads((tools.BACKEND_DIR.parent / "demo_images" / "manifest.json").read_text())
+    demo_skus = {e["sku"] for e in manifest if e.get("sku")}
+    assert demo_skus <= set(seed)

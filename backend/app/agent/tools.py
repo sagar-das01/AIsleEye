@@ -139,7 +139,7 @@ def stock_board() -> list[dict]:
     for sku, item in sorted(read_inventory().items()):
         reorder = item.get("reorder_point", DEFAULT_REORDER_POINT)
         rows.append({
-            "sku": sku, "available": item["available"], "quarantine": item["quarantine"],
+            "sku": sku, "name": item.get("name"), "available": item["available"], "quarantine": item["quarantine"],
             "total": item["available"] + item["quarantine"], "reorder_point": reorder,
             "low_stock": item["available"] < reorder,
         })

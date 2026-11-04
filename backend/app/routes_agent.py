@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from pydantic import BaseModel, Field
 
-from app import audit, observability, replay
+from app import annotations, audit, observability, replay
 from app.agent import orchestrator, tools
 from app.auth import Permission, User, require_permission
 from app.config import get_settings
@@ -50,9 +50,14 @@ def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Re
     scan = replay.find_scan(scan_id)
     if scan is None:
         raise HTTPException(404, "Scan not found.")
+    # The agent dispatches what the supervisor reviewed: corrections and added findings, never rejected ones.
+    scan = annotations.apply(scan)
     unknown = sorted(set(body.finding_ids) - {f.id for f in scan.findings})
     if unknown:
         raise HTTPException(422, f"Unknown finding id(s): {', '.join(u[:40] for u in unknown[:5])}")
+    rejected = sorted({f.id for f in scan.findings if f.review_status == "rejected"} & set(body.finding_ids))
+    if rejected:
+        raise HTTPException(422, f"Rejected finding(s) cannot be dispatched: {', '.join(r[:40] for r in rejected[:5])}")
 
     key = _approval_key(scan_id, body.finding_ids)
     path = tools.DATA_DIR / "approvals" / f"{key}.json"
@@ -71,6 +76,7 @@ def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Re
         payload = run.to_dict()
         payload["tickets"] = [a["result"] for a in payload["actions"] if a["tool"] == "create_incident_ticket" and a["status"] == "executed"]
         write_json(path, payload)
+        annotations.mark_dispatched(scan_id, body.finding_ids)
         return payload
 
 
@@ -87,7 +93,7 @@ def inventory_board() -> list[dict]:
 def shelf_count(scan: ScanResult, exclude_damaged: bool) -> dict:
     """Box count from the scan's own masks (no extra model call); low-confidence boxes make it "needs review"."""
     boxes = [o for o in scan.objects if o.label == "box"]
-    damaged = sum(f.type == "box_damage" for f in scan.findings)
+    damaged = sum(f.type == "box_damage" and f.review_status != "rejected" for f in scan.findings)
     threshold = get_settings().review_confidence
     low = sum(o.confidence < threshold for o in boxes)
     return {
@@ -103,7 +109,7 @@ def scan_count(scan_id: Annotated[str, SCAN_ID], exclude_damaged: bool = True) -
     scan = replay.find_scan(scan_id)
     if scan is None:
         raise HTTPException(404, "Scan not found.")
-    return shelf_count(scan, exclude_damaged)
+    return shelf_count(annotations.apply(scan), exclude_damaged)
 
 
 @router.post("/scan/{scan_id}/reconcile")
@@ -115,7 +121,7 @@ def reconcile(
     scan = replay.find_scan(scan_id)
     if scan is None:
         raise HTTPException(404, "Scan not found.")
-    count = shelf_count(scan, body.exclude_damaged)
+    count = shelf_count(annotations.apply(scan), body.exclude_damaged)
     args = {"sku": body.sku, "counted": count["counted"], "actor_id": user.subject}
 
     def rejected(status: int, reason: str) -> HTTPException:

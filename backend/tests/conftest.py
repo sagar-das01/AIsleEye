@@ -49,6 +49,15 @@ def _isolated_scores(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path_factory, monkeypatch):
+    # Default for every test: runtime writes (tickets, reviews, approvals, inventory) never reach the real backend/data.
+    # Tests that need a specific directory still set their own, which overrides this.
+    from app.agent import tools
+
+    monkeypatch.setattr(tools, "DATA_DIR", tmp_path_factory.mktemp("data"))
+
+
+@pytest.fixture(autouse=True)
 def _authenticated_api(request, monkeypatch, tmp_path):
     from app import audit
     from app.auth import Grant, Role, User, current_user

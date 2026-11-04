@@ -236,6 +236,17 @@ export function Dashboard({ onChanged }: { onChanged?: () => void } = {}) {
                 onReject={
                   can("review") ? (id) => void api.rejectFinding(scan.scan_id, id).then(loadTotals, () => undefined) : undefined
                 }
+                review={
+                  can("review")
+                    ? {
+                        boxes: scan.objects,
+                        // Each call returns the reviewed scan, so the overlay and the list redraw from the server's view.
+                        onCorrect: async (id, edit) => setScan(await api.correctFinding(scan.scan_id, id, edit)),
+                        onAdd: async (objectId, edit) => setScan(await api.addFinding(scan.scan_id, objectId, edit)),
+                        onUndo: async (id) => setScan(await api.undoReview(scan.scan_id, id)),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <p className="mt-3 text-sm text-zinc-500">No scan yet.</p>

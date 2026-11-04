@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Path, Request, Respon
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app import observability, replay, retention, workflow
+from app import annotations, observability, replay, retention, workflow
 from app.config import get_settings
 from app.auth import Permission, require_permission
 from app.pipeline import scan as scan_pipeline
@@ -84,7 +84,7 @@ def health() -> dict:
 
 
 def _replayed(result: ScanResult) -> ScanResult:
-    return result.model_copy(update={"replay": True})
+    return annotations.apply(result.model_copy(update={"replay": True}))
 
 
 @app.post("/scan", response_model=ScanResult, dependencies=[Depends(require_permission(Permission.SCAN))])
@@ -101,7 +101,8 @@ async def scan(image: Annotated[UploadFile, File()]) -> ScanResult:
             if saved is None:
                 raise HTTPException(404, "No saved replay result for this photo. Choose one of the demo photos.")
             return _replayed(saved)
-        return await asyncio.wait_for(run_scan(data, image.content_type), get_settings().scan_timeout_s)
+        # A re-upload of a reviewed photo shows the supervisor's corrections, not the raw model output again.
+        return annotations.apply(await asyncio.wait_for(run_scan(data, image.content_type), get_settings().scan_timeout_s))
     except InvalidImageError as exc:
         raise HTTPException(422, str(exc)) from None
     except (openai.APITimeoutError, TimeoutError) as exc:
@@ -125,7 +126,7 @@ def get_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> ScanResu
     result = replay.find_scan(scan_id)
     if result is None:
         raise HTTPException(404, "Scan not found.")
-    return result
+    return annotations.apply(result)
 
 
 @app.delete("/scan/{scan_id}", status_code=204, dependencies=[Depends(require_permission(Permission.DELETE_SCAN))])
@@ -133,4 +134,5 @@ def delete_scan(scan_id: Annotated[str, Path(pattern=SCAN_ID_PATTERN)]) -> Respo
     # Only the cache: pinned demo results cannot be deleted through the API.
     if not retention.delete_scan(scan_id):
         raise HTTPException(404, "Scan not found.")
+    annotations.delete(scan_id)
     return Response(status_code=204)

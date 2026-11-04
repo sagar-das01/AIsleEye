@@ -11,6 +11,15 @@ export interface BBox {
   y2: number;
 }
 
+export type ReviewStatus = "proposed" | "corrected" | "added" | "rejected";
+
+export interface FindingEdit {
+  type: FindingType;
+  severity: Severity;
+  description: string;
+  reason?: string;
+}
+
 export interface Finding {
   id: string;
   type: FindingType;
@@ -21,6 +30,10 @@ export interface Finding {
   sku?: string | null;
   needs_review?: boolean;
   review_reason?: string | null;
+  review_status?: ReviewStatus;
+  original?: { type: FindingType; severity: Severity; description: string } | null;
+  review_note?: string | null;
+  object_id?: string | null;
 }
 
 export interface DetectedObject {
@@ -155,6 +168,7 @@ export interface Account {
 
 export interface StockRow {
   sku: string;
+  name?: string | null;
   available: number;
   quarantine: number;
   total: number;
@@ -206,7 +220,7 @@ export interface DemoPhoto {
   pinned: boolean;
 }
 
-export type Inventory = Record<string, { available: number; quarantine: number; reorder_point?: number }>;
+export type Inventory = Record<string, { available: number; quarantine: number; reorder_point?: number; name?: string }>;
 
 export interface ScoreCard {
   value: number | null;
@@ -328,6 +342,16 @@ export const api = {
       headers: JSON_HEADERS,
       body: JSON.stringify({ finding_id: findingId, action: "reject", reason }),
     }),
+  correctFinding: (scanId: string, findingId: string, edit: FindingEdit) =>
+    request<ScanResult>(`/scan/${scanId}/findings/${encodeURIComponent(findingId)}`, {
+      method: "PUT",
+      headers: JSON_HEADERS,
+      body: JSON.stringify(edit),
+    }),
+  addFinding: (scanId: string, objectId: string, edit: FindingEdit) =>
+    post<ScanResult>(`/scan/${scanId}/findings`, { object_id: objectId, ...edit }),
+  undoReview: (scanId: string, findingId: string) =>
+    request<ScanResult>(`/scan/${scanId}/findings/${encodeURIComponent(findingId)}/review`, { method: "DELETE" }),
   demoPhoto: async (demo: Pick<DemoPhoto, "id" | "image_url">): Promise<File> => {
     const res = await fetch(`${API_URL}${demo.image_url}`, { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new ApiError(`GET ${demo.image_url} failed: ${res.status}`, res.status);

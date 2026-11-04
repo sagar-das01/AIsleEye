@@ -64,9 +64,9 @@ export function ShelfCountCard({ scanId, inventory, defaultSku, canReconcile, on
           onChange={(e) => setSku(e.target.value)}
         >
           <option value="">Choose a SKU</option>
-          {Object.keys(inventory).map((s) => (
+          {Object.entries(inventory).map(([s, item]) => (
             <option key={s} value={s}>
-              {s}
+              {item.name ? `${s} · ${item.name}` : s}
             </option>
           ))}
         </select>

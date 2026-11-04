@@ -44,7 +44,10 @@ export function StockBoard({ refreshKey }: { refreshKey?: number }) {
         <ul className="mt-3 flex flex-col gap-2">
           {rows.map((r) => (
             <li key={r.sku} className="grid grid-cols-2 gap-1 rounded-md border border-panel-border p-3 text-sm sm:grid-cols-5">
-              <strong className="col-span-2 font-mono sm:col-span-1">{r.sku}</strong>
+              <span className="col-span-2 flex flex-col sm:col-span-1">
+                <strong className="font-mono">{r.sku}</strong>
+                {r.name && <span className="text-xs text-zinc-400">{r.name}</span>}
+              </span>
               <span>Available {r.available}</span>
               <span>Quarantine {r.quarantine}</span>
               <span>Total {r.total}</span>

@@ -15,6 +15,17 @@ class BBox(BaseModel):
     y2: int
 
 
+ReviewStatus = Literal["proposed", "corrected", "added", "rejected"]
+
+
+class FindingOriginal(BaseModel):
+    """What the model proposed before a supervisor corrected it."""
+
+    type: FindingType
+    severity: Severity
+    description: str
+
+
 class Finding(BaseModel):
     id: str
     type: FindingType
@@ -25,6 +36,11 @@ class Finding(BaseModel):
     sku: str | None = None
     needs_review: bool = False
     review_reason: str | None = None
+    # Supervisor review: "proposed" is untouched model output; the rest are human decisions, never model output.
+    review_status: ReviewStatus = "proposed"
+    original: FindingOriginal | None = None
+    review_note: str | None = None
+    object_id: str | None = None
 
 
 class DetectedObject(BaseModel):
