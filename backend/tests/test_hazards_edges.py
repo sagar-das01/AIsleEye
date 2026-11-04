@@ -55,7 +55,7 @@ def box_with_overlap(overlap_px: int) -> tuple["Segment", "Segment"]:
 )
 def test_threshold_and_severity_edges_end_to_end(overlap_px, expected):
     box, walkway = box_with_overlap(overlap_px)
-    findings = hazards.detect_blocked_walkways([box], [walkway])
+    findings = hazards.detect_blocked_walkways([box], [walkway], fill_occlusion=False)
     if expected is None:
         assert findings == []
     else:
@@ -141,3 +141,81 @@ def test_realistic_size_runs_quickly():
     findings = hazards.detect_blocked_walkways(boxes, [walkway])
     assert len(findings) == 30
     assert time.perf_counter() - start < 5
+
+
+# ---- occlusion: a box standing on tape hides the tape beneath it ---------------------------------------------
+
+def stripe_with_hole(box_rect, side=SIDE):
+    stripe = rect(0, 15, side, 25, side)
+    x1, y1, x2, y2 = box_rect
+    stripe[y1:y2, x1:x2] = False
+    return stripe
+
+
+def test_box_standing_on_the_tape_is_blocking_even_though_its_pixels_are_not_tape():
+    box = seg("b", rect(15, 12, 25, 32))
+    walkway = seg("w", stripe_with_hole((15, 12, 25, 32)))
+    assert hazards.detect_blocked_walkways([box], [walkway], fill_occlusion=False) == []  # the raw overlap misses it
+    [finding] = hazards.detect_blocked_walkways([box], [walkway])
+    assert finding.id == "hz_b" and finding.severity == "medium"
+
+
+def test_box_fully_inside_the_stripe_is_high_severity():
+    box = seg("b", rect(15, 16, 25, 24))
+    [finding] = hazards.detect_blocked_walkways([box], [seg("w", stripe_with_hole((15, 16, 25, 24)))])
+    assert finding.severity == "high"
+
+
+def test_box_beside_the_tape_is_not_flagged():
+    box = seg("b", rect(15, 0, 25, 10))
+    assert hazards.detect_blocked_walkways([box], [seg("w", rect(0, 15, SIDE, 25))]) == []
+
+
+def test_gap_much_larger_than_the_box_is_not_treated_as_hidden_tape():
+    tape = np.zeros((SIDE * 4, SIDE * 4), dtype=bool)
+    tape[60:70, 0:40] = True
+    tape[60:70, 120:160] = True  # 80 px gap
+    box = seg("b", rect(75, 58, 85, 72, SIDE * 4))
+    assert hazards.detect_blocked_walkways([box], [seg("w", tape)]) == []
+
+
+def test_occluded_finding_takes_its_confidence_from_the_tape_detection():
+    box = seg("b", rect(15, 12, 25, 28), conf=0.95)
+    [finding] = hazards.detect_blocked_walkways([box], [seg("w", stripe_with_hole((15, 12, 25, 28)), conf=0.6)])
+    assert finding.confidence == pytest.approx(0.6)
+
+
+def test_closing_fills_small_holes_and_keeps_the_stripe_ends():
+    stripe = rect(5, 15, 35, 25)
+    holed = stripe.copy()
+    holed[17:23, 18:24] = False
+    closed = hazards.close_mask(holed, 4)
+    assert np.array_equal(closed, stripe)
+
+
+def test_closing_never_removes_pixels_and_does_not_grow_outwards():
+    rng = np.random.default_rng(1)
+    mask = rng.random((30, 30)) > 0.5
+    closed = hazards.close_mask(mask, 2)
+    assert (closed | mask).sum() == closed.sum()  # superset of the input
+    assert not hazards.close_mask(rect(10, 10, 12, 12), 3)[:9].any()
+
+
+@pytest.mark.parametrize("radius", [0, -1])
+def test_closing_with_no_radius_is_a_noop(radius):
+    mask = rect(5, 5, 9, 9)
+    assert np.array_equal(hazards.close_mask(mask, radius), mask)
+
+
+def test_occlusion_handling_stays_fast_for_big_boxes():
+    side = 1500
+    tape = np.zeros((side, side), dtype=bool)
+    tape[700:760, :] = True
+    boxes = []
+    for i in range(10):
+        x = i * 140
+        tape[700:760, x : x + 120] = False
+        boxes.append(seg(f"b{i}", rect(x, 600, x + 120, 860, side)))
+    start = time.perf_counter()
+    findings = hazards.detect_blocked_walkways(boxes, [seg("w", tape)])
+    assert len(findings) == 10 and time.perf_counter() - start < 5

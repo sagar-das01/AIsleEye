@@ -187,7 +187,7 @@ def test_no_boxes_found_is_a_valid_empty_result(monkeypatch, cache_dir):
 
 
 def test_boxes_without_walkway_only_report_damage(monkeypatch):
-    fakes.install_fake_model(monkeypatch, lambda kw: "" if fakes.concept_of(kw) == "floor tape" else good_handler(kw))
+    fakes.install_fake_model(monkeypatch, lambda kw: "" if fakes.concept_of(kw) == "yellow line" else good_handler(kw))
     body = post(image_bytes()).json()
     assert [f["type"] for f in body["findings"]] == ["box_damage"]
 
@@ -211,7 +211,7 @@ def test_intact_boxes_produce_no_damage_finding(monkeypatch):
 def test_many_boxes_are_inspected_in_chunks_and_all_reported(monkeypatch):
     def handler(kw):
         if kw["model"] == "sam-3.1":
-            if fakes.concept_of(kw) == "floor tape":
+            if fakes.concept_of(kw) == "yellow line":
                 return ""
             recs = [fakes.sam_record(i, (i % 12) * 8, (i // 12) * 8, (i % 12) * 8 + 5, (i // 12) * 8 + 5, w=100, h=80) for i in range(60)]
             return fakes.sam_line(*recs)

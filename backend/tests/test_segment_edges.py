@@ -87,8 +87,8 @@ def test_box_entirely_outside_the_image_is_dropped():
 
 @pytest.mark.xfail(
     strict=True,
-    reason="GAP (verify in the live smoke test): the model reports its own frame size in w/h; if it differs from "
-    "the image we sent, coordinates must be scaled to the image instead of being used as raw pixels",
+    reason="GAP (not seen live: SAM reported the sent frame): if w/h ever differs from the image we sent, "
+    "coordinates must be scaled to the image instead of being used as raw pixels",
 )
 def test_coordinates_are_scaled_when_the_model_frame_differs_from_the_image():
     [s] = parsed(fakes.sam_line(fakes.sam_record(0, 100, 80, 119, 99, w=200, h=160)))  # 2x frame
@@ -143,7 +143,7 @@ def test_segment_all_with_no_matches_returns_both_labels_empty(monkeypatch):
 def test_each_request_has_one_concept_one_image_and_sam_metadata(monkeypatch):
     fake = fakes.install_fake_model(monkeypatch, sam_handler)
     run(seg_mod.segment_all("data:image/jpeg;base64,AA", width=W, height=H))
-    assert sorted(fakes.concept_of(c) for c in fake.calls) == ["cardboard box", "floor tape"]
+    assert sorted(fakes.concept_of(c) for c in fake.calls) == ["cardboard box", "yellow line"]
     for call in fake.calls:
         assert [p["type"] for p in call["input"][0]["content"]] == ["input_text", "input_image"]
         assert call["metadata"] == {"mask_encoding": "one_bit", "include_confidence": "true"}
@@ -190,7 +190,7 @@ def test_model_errors_propagate_as_openai_errors(monkeypatch, error):
 
 def test_failure_of_one_concept_fails_the_scan_rather_than_returning_half_a_result(monkeypatch):
     err = openai.APIConnectionError(request=httpx.Request("POST", "https://x.test"))
-    fakes.install_fake_model(monkeypatch, lambda kw: err if fakes.concept_of(kw) == "floor tape" else sam_handler(kw))
+    fakes.install_fake_model(monkeypatch, lambda kw: err if fakes.concept_of(kw) == "yellow line" else sam_handler(kw))
     with pytest.raises(openai.APIError):
         run(seg_mod.segment_all("data:image/jpeg;base64,AA", width=W, height=H))
 
@@ -200,3 +200,15 @@ def test_segment_never_sends_more_than_the_image_it_was_given(monkeypatch):
     run(seg_mod.segment("data:image/jpeg;base64,QUJD", "cardboard box", width=W, height=H))
     sent = fake.calls[0]["input"][0]["content"][1]["image_url"]
     assert sent == "data:image/jpeg;base64,QUJD"
+
+
+def test_walkway_concept_comes_from_settings(monkeypatch):
+    monkeypatch.setenv("WALKWAY_CONCEPT", "red tape")
+    seg_mod.get_settings.cache_clear()
+    try:
+        fake = fakes.install_fake_model(monkeypatch, lambda kw: "")
+        run(seg_mod.segment_all("data:image/jpeg;base64,AA", width=W, height=H))
+        assert sorted(fakes.concept_of(c) for c in fake.calls) == ["cardboard box", "red tape"]
+    finally:
+        monkeypatch.undo()
+        seg_mod.get_settings.cache_clear()

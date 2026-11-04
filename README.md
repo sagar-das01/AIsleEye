@@ -51,7 +51,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 3. **Protect privacy** 🚧 — people in the photo are segmented and blurred before anything is stored, cropped or passed to later stages.
 4. **Segment** — SAM 3.1 is prompted with concepts such as `cardboard box` and `floor tape`, returning a box and a pixel mask for every instance.
 5. **Inspect** — each box crop is sent to Muse Spark with a strict JSON schema (`damaged`, `damage_type`, `severity`, `confidence`, `reason`).
-6. **Detect hazards** — walkway blockage is computed **geometrically** (box mask ∩ walkway mask), not guessed by a model, so it is deterministic and explainable.
+6. **Detect hazards** — walkway blockage is computed **geometrically** (box mask ∩ walkway region), not guessed by a model, so it is deterministic and explainable. A box standing on tape hides the tape under it, so the tape mask is closed over gaps up to the box's own size before the overlap is measured; a box is flagged when more than 15% of its area lies on the walkway.
 7. **Review** — findings are shown on the image overlay with severity and confidence. Low-confidence results and scans with nothing detected are flagged **needs human review** 🚧. The supervisor approves, rejects or corrects each finding, and rejections are kept as feedback 🚧.
 8. **Guard** 🚧 — an action guard checks every tool call the agent proposes against the approved findings before it runs.
 9. **Dispatch** — a LangChain agent (Muse Spark, LangGraph runtime) calls tools to create a PDF incident ticket, move damaged units to quarantine and append a compliance log entry. Every tool argument is validated before execution, and each action is written to an append-only audit log 🚧.
@@ -125,7 +125,8 @@ The privacy blur, action guard, feedback log and audit log are planned (Phase 5)
 │   ├── app/
 │   │   ├── main.py          # FastAPI app, CORS, /health
 │   │   ├── config.py        # Settings loaded from the root .env
-│   │   └── clients.py       # Meta Model API client + image helpers
+│   │   ├── clients.py       # Meta Model API client + image helpers
+│   │   └── pipeline/        # SAM segmentation, damage inspection, hazards, /scan orchestration
 │   ├── scripts/
 │   │   └── smoke_test.py    # Verifies every model capability end to end
 │   ├── tests/               # pytest suite (offline)
@@ -235,7 +236,8 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | Method | Path | Status | Purpose |
 |---|---|---|---|
 | GET | `/health` | ✅ available | Liveness and configured models |
-| POST | `/scan` | 🚧 planned | Image → segmented boxes, walkway mask and findings |
+| POST | `/scan` | ✅ available | Image → segmented boxes, walkway mask and findings |
+| GET | `/scan/{scan_id}` | ✅ available | Cached scan result (demo replay) |
 | POST | `/scan/{scan_id}/approve` | 🚧 planned | Run the agent on approved findings; returns actions, tickets and a `trace_id`; idempotent, so a repeat call returns the first result |
 | GET | `/inventory` | 🚧 planned | Current inventory, including quarantine |
 | GET | `/tickets` | 🚧 planned | Incident tickets |
@@ -295,7 +297,7 @@ gh pr create --base master --fill
 ## Roadmap
 
 - [x] **Phase 0** — Project scaffold, Meta Model API client, capability smoke test, dashboard shell, CI release pipeline
-- [ ] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
+- [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
 - [ ] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
 - [ ] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states
 - [ ] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner

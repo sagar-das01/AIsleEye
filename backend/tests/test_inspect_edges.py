@@ -230,3 +230,21 @@ def test_crop_matches_the_padded_bounds():
     url = inspect_mod.crop_to_data_url(Image.new("RGB", (200, 200)), BBox(x1=50, y1=50, x2=150, y2=150))
     crop = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
     assert crop.size == (120, 120)  # 100 px + 10% padding each side
+
+
+def test_inspection_sends_the_configured_reasoning_effort(monkeypatch, image):
+    fake = fakes.install_fake_model(monkeypatch, echo_handler)
+    asyncio.run(inspect_mod.inspect_boxes(image, [BOX]))
+    assert fake.calls[0]["reasoning"] == {"effort": "minimal"}
+
+
+def test_blank_reasoning_effort_means_the_model_default(monkeypatch, image):
+    monkeypatch.setenv("MUSE_REASONING_EFFORT", "")
+    inspect_mod.get_settings.cache_clear()
+    try:
+        fake = fakes.install_fake_model(monkeypatch, echo_handler)
+        asyncio.run(inspect_mod.inspect_boxes(image, [BOX]))
+        assert "reasoning" not in fake.calls[0]
+    finally:
+        monkeypatch.undo()
+        inspect_mod.get_settings.cache_clear()
