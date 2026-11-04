@@ -1,5 +1,5 @@
 import type { ScanResult } from "@/lib/api";
-import { boxStatus } from "@/lib/scan";
+import { boxNumbers, boxStatus } from "@/lib/scan";
 
 interface Props {
   imageUrl: string;
@@ -14,6 +14,7 @@ export function ScanOverlay({ imageUrl, scan }: Props) {
   const boxes = scan.objects.filter((o) => o.label === "box");
   const walkways = scan.objects.filter((o) => o.label === "walkway");
   const labelSize = Math.max(FONT, Math.round(width / 45));
+  const numbers = boxNumbers(scan.objects);
   const description = `${boxes.length} box${boxes.length === 1 ? "" : "es"} and ${walkways.length} walkway marking${walkways.length === 1 ? "" : "s"} detected`;
 
   return (
@@ -65,11 +66,24 @@ export function ScanOverlay({ imageUrl, scan }: Props) {
                 icon={blocked ? "⚠" : damage ? "✕" : "✓"}
                 tone={blocked || damage ? "#ef4444" : "#34d399"}
               />
+              <BoxNumber x={box.bbox.x1} y={box.bbox.y2} size={labelSize} n={numbers.get(box.id)!} />
             </g>
           );
         })}
       </svg>
     </div>
+  );
+}
+
+function BoxNumber({ x, y, size, n }: { x: number; y: number; size: number; n: number }) {
+  const top = Math.max(0, y - size * 1.5);
+  return (
+    <g aria-label={`Box ${n}`}>
+      <rect x={x} y={top} width={size * 2.4} height={size * 1.5} fill="#0b0d10" stroke="#a1a1aa" strokeWidth={1.5} rx={3} />
+      <text x={x + size * 0.4} y={top + size * 1.1} fontSize={size} fill="#fff" fontFamily="sans-serif">
+        #{n}
+      </text>
+    </g>
   );
 }
 

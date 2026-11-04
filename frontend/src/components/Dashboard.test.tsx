@@ -32,6 +32,9 @@ beforeEach(() => {
   scores = vi.spyOn(api, "scores").mockResolvedValue(NO_SCORES);
   vi.spyOn(api, "inventory").mockResolvedValue({ "SKU-1042": { available: 5, quarantine: 3 }, "SKU-2": { available: 1, quarantine: 2 } });
   vi.spyOn(api, "demos").mockResolvedValue([]);
+  vi.spyOn(api, "shelfCount").mockResolvedValue({
+    scan_id: "0123456789abcdef", boxes: 3, damaged: 1, counted: 2, exclude_damaged: true, low_confidence: 0, needs_review: false,
+  });
   vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "" });
 });
 
@@ -228,7 +231,7 @@ describe("Dashboard: approving", () => {
     fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "SKU-1042" } });
     fireEvent.click(screen.getByRole("button", { name: "Approve & Dispatch (2)" }));
 
-    expect(approve).toHaveBeenCalledWith("0123456789abcdef", ["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" });
+    expect(approve).toHaveBeenCalledWith("0123456789abcdef", ["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" }, {});
     expect(screen.getByText("Agent dispatching…")).toBeDefined();
     expect((screen.getByRole("button", { name: "Dispatching…" }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -266,7 +269,7 @@ describe("Dashboard: approving", () => {
     expect((screen.getByRole("button", { name: /Approve & Dispatch/ }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("Create incident ticket");
-    expect(approve).toHaveBeenLastCalledWith("0123456789abcdef", ["dmg_box_0"], {});
+    expect(approve).toHaveBeenLastCalledWith("0123456789abcdef", ["dmg_box_0"], {}, {});
     expect(approve).toHaveBeenCalledTimes(2);
   });
 });
@@ -321,18 +324,6 @@ describe("Dashboard: demo photos and replay", () => {
     expect(screen.queryByLabelText("Replay notice")).toBeNull();
   });
 
-  it("says plainly when sign-in is switched off for a local demo session, and otherwise says nothing", async () => {
-    await upload();
-    await screen.findByText("Damaged box");
-    expect(screen.queryByLabelText("Demo access notice")).toBeNull();
-    cleanup();
-    vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "", auth_bypass: true });
-    render(<Dashboard />);
-    const notice = await screen.findByLabelText("Demo access notice");
-    expect(notice.textContent).toMatch(/sign-in is switched off/);
-    expect(notice.textContent).toMatch(/Local use only/);
-  });
-
   it("shows a clear replay banner for the whole session when the backend is in replay mode", async () => {
     vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "replay" });
     vi.spyOn(api, "demos").mockResolvedValue(DEMOS);
@@ -364,3 +355,24 @@ describe("Dashboard: demo photos and replay", () => {
     expect(await screen.findByText(/built-in rules dispatched these actions/)).toBeDefined();
   });
 });
+
+describe("Dashboard: correcting findings", () => {
+  it("saves a correction and redraws the list and overlay from the reviewed scan", async () => {
+    const reviewed = makeScan({
+      findings: [
+        { ...makeScan().findings[0], type: "walkway_blocked", description: "Sits on the lane.", review_status: "corrected",
+          original: { type: "box_damage", severity: "high", description: "Box box_0: crushed corner." } },
+        makeScan().findings[1],
+      ],
+    });
+    const correctFinding = vi.spyOn(api, "correctFinding").mockResolvedValue(reviewed);
+    await upload();
+    fireEvent.click((await screen.findAllByRole("button", { name: /Correct this finding/ }))[0]);
+    fireEvent.change(screen.getByLabelText("Finding type"), { target: { value: "walkway_blocked" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+    expect(await screen.findByText("✎ Corrected by supervisor")).toBeDefined();
+    expect(correctFinding).toHaveBeenCalledWith("0123456789abcdef", "dmg_box_0", expect.objectContaining({ type: "walkway_blocked" }));
+    expect(screen.getByTestId("object-box_0").getAttribute("data-state")).toBe("blocked");
+  });
+});
+

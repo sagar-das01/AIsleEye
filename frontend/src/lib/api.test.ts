@@ -13,7 +13,7 @@ describe("api.health", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(api.health()).resolves.toEqual(body);
-    expect(fetchMock).toHaveBeenCalledWith(`${API_URL}/health`, { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith(`${API_URL}/health`, expect.objectContaining({ cache: "no-store", credentials: "same-origin" }));
   });
 
   it("throws with method, path and status on non-2xx", async () => {
@@ -31,6 +31,6 @@ describe("api.health", () => {
 
 describe("API_URL", () => {
   it("defaults to the local backend", () => {
-    expect(API_URL).toBe(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000");
+    expect(API_URL).toBe(process.env.NEXT_PUBLIC_API_URL ?? "/api");
   });
 });

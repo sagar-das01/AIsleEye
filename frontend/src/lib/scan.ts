@@ -8,11 +8,23 @@ export interface BoxStatus {
   blocked: Finding | null;
 }
 
+/** The detected box a finding belongs to: explicit for supervisor-added findings, else encoded in the model's id. */
+export function objectIdOf(finding: Finding): string {
+  return finding.object_id ?? finding.id.replace(/^(dmg|hz)_/, "");
+}
+
 export function boxStatus(object: DetectedObject, findings: Finding[]): BoxStatus {
+  // Uses the reviewed type, so a supervisor's correction or rejection is what the overlay shows.
+  const live = findings.filter((f) => objectIdOf(f) === object.id && f.review_status !== "rejected");
   return {
-    damage: findings.find((f) => f.id === `dmg_${object.id}`) ?? null,
-    blocked: findings.find((f) => f.id === `hz_${object.id}`) ?? null,
+    damage: live.find((f) => f.type === "box_damage") ?? null,
+    blocked: live.find((f) => f.type === "walkway_blocked") ?? null,
   };
+}
+
+/** Stable, human-friendly box numbers ("#1", "#2", …) in detection order, shared by the overlay and the review form. */
+export function boxNumbers(objects: DetectedObject[]): Map<string, number> {
+  return new Map(objects.filter((o) => o.label === "box").map((o, i) => [o.id, i + 1]));
 }
 
 export function validateUpload(file: File): string | null {
@@ -29,6 +41,15 @@ export interface FriendlyError {
 
 export function describeError(error: unknown): FriendlyError {
   if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return { message: "Your session has ended. Sign in again to continue.", retryable: false };
+    }
+    if (error.status === 403) {
+      return { message: error.detail ?? "Your role does not allow this action.", retryable: false };
+    }
+    if (error.status === 409) {
+      return { message: error.detail ?? "This changed since you loaded it. Refresh and try again.", retryable: false };
+    }
     if (error.status === 504) {
       return { message: "The analysis took too long. Please try again, or use a smaller photo.", retryable: true };
     }

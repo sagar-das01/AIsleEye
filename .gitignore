@@ -16,6 +16,9 @@ backend/data/audit_log.jsonl
 backend/data/tickets/
 backend/data/approvals/
 backend/data/access.json
+backend/data/users.json
+backend/data/sessions.json
+backend/data/reconciles/
 datasets/
 # Raw dataset downloads at the repository root. backend/data holds tracked demo results, so it is not ignored as a whole.
 /data/

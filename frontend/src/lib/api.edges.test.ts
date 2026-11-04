@@ -21,9 +21,9 @@ describe("API_URL configuration", () => {
     expect(API_URL).toBe("https://api.example.test");
   });
 
-  it("falls back to the local backend when unset", async () => {
+  it("falls back to the same-origin /api proxy when unset", async () => {
     const { API_URL } = await loadApi();
-    expect(API_URL).toBe("http://localhost:8000");
+    expect(API_URL).toBe("/api");
   });
 
   it("builds request URLs from the override", async () => {

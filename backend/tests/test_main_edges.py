@@ -8,7 +8,7 @@ client = TestClient(app)
 
 def test_health_shape_is_stable():
     body = client.get("/health").json()
-    assert set(body) == {"status", "models", "demo_mode", "auth_bypass"}
+    assert set(body) == {"status", "models", "demo_mode", "demo_sign_in"}
     assert set(body["models"]) == {"vision_agent", "segmentation"}
 
 

@@ -10,4 +10,4 @@ npm run lint
 npm run build
 ```
 
-The dashboard talks to the backend at `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`; set it in `.env.local`). It has no sign-in yet, so start the backend with `scripts/demo.sh` or the local demo switch described in the root README.
+The browser only talks to this origin: `next.config.ts` proxies `/api/*` to the fixed `BACKEND_URL` (default `http://127.0.0.1:8000`, read at build time), so the backend's HttpOnly session cookie covers API calls and PDF links. Leave `NEXT_PUBLIC_API_URL` unset (remove it from any old `.env.local`): pointing the browser straight at the backend would drop the cookie. Start the backend with `DEMO_SIGN_IN_ENABLED=true` (or run `scripts/demo.sh`) and pick a role on the first screen; see "Authentication and RBAC" in the root README.

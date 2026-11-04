@@ -76,15 +76,25 @@ def check_replay_offline() -> Result:
     from app import audit, config, main, replay, scoring
     from app.agent import tools
 
-    saved = {k: os.environ.get(k) for k in ("DEMO_MODE", "MODEL_API_BASE_URL", "DEMO_AUTH_BYPASS")}
-    os.environ.update(DEMO_MODE="replay", MODEL_API_BASE_URL="http://127.0.0.1:9", DEMO_AUTH_BYPASS="true")
-    config.get_settings.cache_clear()
+    keys = ("DEMO_MODE", "MODEL_API_BASE_URL", "DEMO_SIGN_IN_ENABLED", "SESSION_FILE", "RBAC_USERS_FILE")
+    saved = {k: os.environ.get(k) for k in keys}
     originals = (tools.DATA_DIR, audit.AUDIT_PATH, scoring.SCORES_PATH)
     try:
         with tempfile.TemporaryDirectory() as tmp:
+            # Sessions and account flags live in the throwaway directory too, so the check never touches real ones.
+            os.environ.update(
+                DEMO_MODE="replay", MODEL_API_BASE_URL="http://127.0.0.1:9", DEMO_SIGN_IN_ENABLED="true",
+                SESSION_FILE=str(Path(tmp) / "sessions.json"), RBAC_USERS_FILE=str(Path(tmp) / "users.json"),
+            )
+            config.get_settings.cache_clear()
             tools.DATA_DIR, audit.AUDIT_PATH, scoring.SCORES_PATH = Path(tmp), Path(tmp) / "audit.jsonl", Path(tmp) / "scores.jsonl"
             (Path(tmp) / "inventory.json").write_text((config.DATA_DIR / "inventory.seed.json").read_text())
-            client = TestClient(main.app, client=("127.0.0.1", 50000))  # as the dashboard on this machine would appear
+            origin = config.get_settings().cors_origins[0]
+            client = TestClient(main.app, headers={"Origin": origin})  # signed in as the dashboard's floor manager would be
+            signed_in = client.post("/auth/demo-sign-in", json={"persona_id": "floor-manager"})
+            if signed_in.status_code != 200:
+                return FAIL, f"demo sign-in answered {signed_in.status_code}"
+            client.headers["X-CSRF-Token"] = signed_in.json()["csrf_token"]
             for e in replay.load_manifest():
                 data = replay.demo_image_path(e["id"]).read_bytes()
                 res = client.post("/scan", files={"image": (f"{e['id']}.jpg", data, "image/jpeg")})

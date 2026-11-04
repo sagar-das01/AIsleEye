@@ -290,7 +290,7 @@ def test_demo_photos_dispatch_correctly_from_their_pinned_results(world, monkeyp
         assert all(a.status == "executed" for a in result.actions), entry["id"]
         expected_tickets = len(ids)
         assert sum(a.tool == "create_incident_ticket" for a in result.actions) == expected_tickets
-        (world / "tickets" / "index.jsonl").unlink(missing_ok=True)  # each photo starts without open tickets
+        (world / "tickets" / "workflow.json").unlink(missing_ok=True)  # each photo starts without active tickets
         (world / "inventory.json").write_text(json.dumps({s: {"available": 40, "quarantine": 0} for s in json.loads(tools.SEED_INVENTORY.read_text())}))
 
 

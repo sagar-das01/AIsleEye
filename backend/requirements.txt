@@ -9,7 +9,6 @@ numpy>=1.26
 reportlab>=4.2
 meta-sam-parser>=0.1.0
 truststore>=0.10
-PyJWT[crypto]>=2.10,<3
 langchain>=1.4
 langchain-openai>=1.7
 langgraph>=1.2

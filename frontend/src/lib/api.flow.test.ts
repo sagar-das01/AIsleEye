@@ -19,7 +19,7 @@ describe("api.scan", () => {
     expect(url).toBe(`${API_URL}/scan`);
     expect(init.method).toBe("POST");
     expect((init.body as FormData).get("image")).toBeInstanceOf(File);
-    expect(init.headers).toBeUndefined();
+    expect((init.headers as Headers).has("Content-Type")).toBe(false); // the browser sets the multipart boundary
   });
 });
 
@@ -29,8 +29,8 @@ describe("api.approve", () => {
     await api.approve("0123456789abcdef", ["dmg_box_0"], { dmg_box_0: "SKU-1" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${API_URL}/scan/0123456789abcdef/approve`);
-    expect(init.headers).toEqual({ "Content-Type": "application/json" });
-    expect(JSON.parse(init.body)).toEqual({ finding_ids: ["dmg_box_0"], skus: { dmg_box_0: "SKU-1" } });
+    expect((init.headers as Headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({ finding_ids: ["dmg_box_0"], skus: { dmg_box_0: "SKU-1" }, details: {} });
   });
 
   it("defaults to no SKUs", async () => {

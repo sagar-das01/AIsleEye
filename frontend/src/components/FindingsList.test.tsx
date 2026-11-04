@@ -28,14 +28,14 @@ describe("FindingsList", () => {
   it("selects every finding by default and sends all of them on approve", () => {
     const onApprove = setup();
     fireEvent.click(screen.getByRole("button", { name: "Approve & Dispatch (2)" }));
-    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {});
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {}, {});
   });
 
   it("excludes an unticked finding and updates the count", () => {
     const onApprove = setup();
     fireEvent.click(screen.getByRole("checkbox", { name: /Blocked walkway hz_box_2/ }));
     fireEvent.click(screen.getByRole("button", { name: "Approve & Dispatch (1)" }));
-    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0"], {});
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0"], {}, {});
   });
 
   it("disables approve when nothing is selected", () => {
@@ -52,7 +52,7 @@ describe("FindingsList", () => {
     const onApprove = setup();
     fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "  SKU-1042 " } });
     fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
-    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" });
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" }, {});
   });
 
   it("only asks for a SKU on damaged boxes and suggests known SKUs", () => {
@@ -66,7 +66,7 @@ describe("FindingsList", () => {
     fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "SKU-1042" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /Damaged box dmg_box_0/ }));
     fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
-    expect(onApprove).toHaveBeenCalledWith(["hz_box_2"], {});
+    expect(onApprove).toHaveBeenCalledWith(["hz_box_2"], {}, {});
   });
 
   it("locks everything while a request is pending and says so", () => {
@@ -119,13 +119,39 @@ describe("FindingsList", () => {
     const onApprove = setup({ defaultSku: "SKU-1042" });
     expect((screen.getByPlaceholderText("e.g. SKU-1042") as HTMLInputElement).value).toBe("SKU-1042");
     fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
-    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" });
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" }, {});
   });
 
   it("lets the supervisor clear a suggested SKU", () => {
     const onApprove = setup({ defaultSku: "SKU-1042" });
     fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
-    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {});
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {}, {});
+  });
+
+  it("labels findings as AI proposals that need approval", () => {
+    setup();
+    expect(screen.getByText(/AI-proposed findings\. Nothing is dispatched until you approve/)).toBeDefined();
+  });
+
+  it("previews the stock move for a damaged box with a known SKU, using the guard's one-unit rule", () => {
+    setup({ defaultSku: "SKU-1042" });
+    expect(screen.getByLabelText("Stock preview for dmg_box_0").textContent).toBe(
+      "On approval: SKU-1042 −1 available (5 → 4), +1 quarantine",
+    );
+    fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "SKU-UNKNOWN" } });
+    expect(screen.queryByLabelText("Stock preview for dmg_box_0")).toBeNull();
+  });
+
+  it("sends trimmed supervisor location and instructions for selected findings only", () => {
+    const onApprove = setup();
+    const [location] = screen.getAllByLabelText(/Location \(aisle/);
+    const [instructions] = screen.getAllByLabelText("Instructions");
+    fireEvent.change(location, { target: { value: "  Aisle 4  " } });
+    fireEvent.change(instructions, { target: { value: "Rewrap the pallet" } });
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {}, {
+      dmg_box_0: { location: "Aisle 4", instructions: "Rewrap the pallet" },
+    });
   });
 });

@@ -1,184 +1,66 @@
+import hmac
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from enum import StrEnum
-from functools import lru_cache
 from typing import Annotated
-from urllib.parse import urlparse
 
-import jwt
 from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jwt import PyJWKClient
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app import audit
+from app import audit, personas, sessions
 from app.config import get_settings
-from app.storage import read_json
+from app.identity import ROLE_PERMISSIONS, Grant, Permission, Role, User
+
+__all__ = ["ROLE_PERMISSIONS", "Grant", "Permission", "Role", "User"]
 
 logger = logging.getLogger(__name__)
-bearer = HTTPBearer(auto_error=False)
 
 
-class Role(StrEnum):
-    ADMIN = "admin"
-    OPERATIONS_MANAGER = "operations_manager"
-    FLOOR_MANAGER = "floor_manager"
-    TECHNICIAN = "technician"
-    REPORTER = "reporter"
-    AUDITOR = "auditor"
-    DISPATCHER = "dispatcher"
-    SAFETY_OFFICER = "safety_officer"
-    INVENTORY_CONTROLLER = "inventory_controller"
-    QUALITY_INSPECTOR = "quality_inspector"
-    VIEWER = "viewer"
-    CONTRACTOR = "contractor"
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+SESSION_COOKIE = "aisleeye_session"
+CSRF_HEADER = "X-CSRF-Token"
 
 
-class Permission(StrEnum):
-    SCAN = "scan"
-    REVIEW = "review"
-    APPROVE = "approve"
-    DELETE_SCAN = "delete_scan"
-    TICKETS = "tickets"
-    INVENTORY = "inventory"
-    COMPLIANCE = "compliance"
-    AUDIT = "audit"
-    SCORES = "scores"
+def check_origin(request: Request) -> None:
+    """Browsers always send Origin on cross-site mutations; an unknown one is refused before anything changes."""
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in get_settings().cors_origins:
+        logger.warning("Rejected a state-changing request from an unexpected origin")
+        raise HTTPException(403, "Request origin is not allowed.")
 
 
-MANAGER_PERMISSIONS = frozenset({
-    Permission.SCAN, Permission.REVIEW, Permission.APPROVE, Permission.DELETE_SCAN,
-    Permission.TICKETS, Permission.INVENTORY, Permission.COMPLIANCE, Permission.SCORES,
-})
-ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
-    Role.ADMIN: frozenset(Permission),
-    Role.OPERATIONS_MANAGER: MANAGER_PERMISSIONS,
-    Role.FLOOR_MANAGER: MANAGER_PERMISSIONS,
-    Role.TECHNICIAN: frozenset({Permission.TICKETS}),
-    Role.REPORTER: frozenset(),
-    Role.AUDITOR: frozenset({Permission.TICKETS, Permission.COMPLIANCE, Permission.AUDIT}),
-    Role.DISPATCHER: frozenset({Permission.TICKETS}),
-    Role.SAFETY_OFFICER: frozenset({Permission.TICKETS}),
-    Role.INVENTORY_CONTROLLER: frozenset({Permission.TICKETS, Permission.INVENTORY}),
-    Role.QUALITY_INSPECTOR: frozenset({Permission.TICKETS}),
-    Role.VIEWER: frozenset({Permission.SCORES}),
-    Role.CONTRACTOR: frozenset({Permission.TICKETS}),
-}
+def is_active(user: User) -> bool:
+    return user.active and (user.expires_at is None or user.expires_at > datetime.now(UTC))
 
 
-class Grant(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    role: Role
-    warehouse_id: str = Field(min_length=1, max_length=100)
-    area_id: str | None = Field(default=None, min_length=1, max_length=100)
-    team: str | None = Field(default=None, min_length=1, max_length=100)
-
-    @model_validator(mode="after")
-    def dispatcher_requires_team(self) -> "Grant":
-        if self.role == Role.DISPATCHER and self.team is None:
-            raise ValueError("Dispatchers require an explicit team scope.")
-        return self
-
-
-class User(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    subject: str = Field(min_length=1, max_length=255)
-    display_name: str = Field(min_length=1, max_length=120)
-    active: bool = True
-    expires_at: datetime | None = None
-    grants: list[Grant] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def expiry_requires_timezone(self) -> "User":
-        if self.expires_at is not None and self.expires_at.tzinfo is None:
-            raise ValueError("expires_at must include a timezone.")
-        return self
-
-
-class Directory(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    users: list[User]
-
-    @model_validator(mode="after")
-    def unique_subjects(self) -> "Directory":
-        subjects = [user.subject for user in self.users]
-        if len(subjects) != len(set(subjects)):
-            raise ValueError("User subjects must be unique.")
-        return self
-
-
-@lru_cache(maxsize=4)
-def jwks_client(url: str) -> PyJWKClient:
-    return PyJWKClient(url, timeout=5, cache_jwk_set=True, lifespan=300)
-
-
-def verify_token(token: str) -> str:
-    settings = get_settings()
-    if not settings.oidc_audience or any(
-        urlparse(url).scheme != "https" or not urlparse(url).netloc
-        for url in (settings.oidc_issuer, settings.oidc_jwks_url)
-    ):
-        logger.error("OIDC issuer, audience and HTTPS JWKS URL must be configured")
-        raise HTTPException(503, "Authentication is not configured.")
+def resolve_session(request: Request) -> tuple[User, sessions.Session]:
+    if not get_settings().demo_sign_in_enabled:
+        raise HTTPException(401, "Demo sign-in is disabled.")
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise HTTPException(401, "Authentication required.")
     try:
-        key = jwks_client(settings.oidc_jwks_url).get_signing_key_from_jwt(token)
-        claims = jwt.decode(
-            token,
-            key.key,
-            algorithms=["RS256"],
-            issuer=settings.oidc_issuer,
-            audience=settings.oidc_audience,
-            options={"require": ["exp", "iat", "sub", "iss", "aud"]},
-        )
-    except (jwt.PyJWKClientConnectionError, jwt.PyJWKSetError, jwt.PyJWKError):
-        logger.warning("OIDC signing keys are unavailable")
-        raise HTTPException(503, "Authentication service is unavailable.") from None
-    except (jwt.InvalidTokenError, jwt.PyJWKClientError):
-        raise HTTPException(401, "Invalid or expired access token.", headers={"WWW-Authenticate": "Bearer"}) from None
-    subject = claims.get("sub")
-    if not isinstance(subject, str) or not subject:
-        raise HTTPException(401, "Invalid access token.", headers={"WWW-Authenticate": "Bearer"})
-    return subject
-
-
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip")
-
-
-def demo_user(request: Request) -> User | None:
-    """The sign-in-free admin for a local demo, only for a direct loopback request that presents no token.
-
-    Anything behind a proxy, from another machine, or carrying a token goes through normal authentication.
-    """
-    settings = get_settings()
-    client = request.client.host if request.client else ""
-    if not settings.demo_auth_bypass or client not in LOOPBACK_HOSTS or any(h in request.headers for h in PROXY_HEADERS):
-        return None
-    return User(subject="demo-admin", display_name="Demo session (sign-in bypassed)", grants=[
-        Grant(role=Role.ADMIN, warehouse_id=settings.rbac_warehouse_id),
-    ])
-
-
-def current_user(request: Request, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> User:
-    if credentials is None:
-        demo = demo_user(request)
-        if demo is not None:
-            return demo
-        raise HTTPException(401, "Authentication required.", headers={"WWW-Authenticate": "Bearer"})
-    subject = verify_token(credentials.credentials)
+        session = sessions.lookup(token)
+    except sessions.SessionStoreError:
+        logger.error("The session store is unavailable or invalid")
+        raise HTTPException(503, "Session storage is unavailable.") from None
+    if session is None:
+        raise HTTPException(401, "Your session has expired. Sign in again.")
     try:
-        directory = Directory.model_validate(read_json(get_settings().rbac_users_file))
-    except (OSError, ValueError):
-        logger.error("The RBAC user directory is unavailable or invalid")
+        user = personas.find_user(session.user_id)
+    except personas.UserStoreError:
+        logger.error("The demo user store is unavailable or invalid")
         raise HTTPException(503, "Access configuration is unavailable.") from None
-    user = next((entry for entry in directory.users if entry.subject == subject), None)
-    if user is None or not user.active or (user.expires_at is not None and user.expires_at <= datetime.now(UTC)):
-        raise HTTPException(403, "User access is disabled or not provisioned.")
-    return user
+    if user is None or not is_active(user):
+        raise HTTPException(401, "This demo account is disabled. Choose another role.")
+    if request.method not in SAFE_METHODS:
+        check_origin(request)
+        if not hmac.compare_digest(request.headers.get(CSRF_HEADER, ""), session.csrf_token):
+            raise HTTPException(403, "Missing or invalid CSRF token. Refresh the page and try again.")
+    return user, session
+
+
+def current_user(request: Request) -> User:
+    return resolve_session(request)[0]
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
@@ -239,16 +121,65 @@ def can_view_ticket(user: User, ticket: dict) -> bool:
     return False
 
 
-def ticket_reader(user: CurrentUser) -> User:
-    if not any(
+def has_scoped_permission(user: User, permission: Permission) -> bool:
+    """Held in at least one grant for this warehouse, whatever its area or team; objects are then checked one by one."""
+    return any(
         grant.role == Role.ADMIN or (
-            grant.warehouse_id == get_settings().rbac_warehouse_id
-            and Permission.TICKETS in ROLE_PERMISSIONS[grant.role]
+            grant.warehouse_id == get_settings().rbac_warehouse_id and permission in ROLE_PERMISSIONS[grant.role]
         )
         for grant in user.grants
-    ):
+    )
+
+
+def ticket_reader(user: CurrentUser) -> User:
+    if not has_scoped_permission(user, Permission.TICKETS):
         raise HTTPException(403, "You do not have permission to access tickets.")
     return user
 
 
+def ticket_assigner(user: CurrentUser) -> User:
+    if not has_scoped_permission(user, Permission.ASSIGN):
+        raise HTTPException(403, "You do not have permission to assign tickets.")
+    return user
+
+
 TicketReader = Annotated[User, Depends(ticket_reader)]
+TicketAssigner = Annotated[User, Depends(ticket_assigner)]
+
+
+def _ticket_scope(ticket: dict) -> tuple[str, str | None, str | None]:
+    return (
+        ticket.get("warehouse_id") or get_settings().rbac_warehouse_id,
+        ticket.get("area_id"),
+        ticket.get("assignee_team"),
+    )
+
+
+def can_assign_ticket(user: User, ticket: dict) -> bool:
+    """Assignment is a per-grant capability: the ASSIGN grant itself must cover the ticket's warehouse, area and team."""
+    scope = _ticket_scope(ticket)
+    return any(
+        grant.role == Role.ADMIN or (Permission.ASSIGN in ROLE_PERMISSIONS[grant.role] and grant_matches(grant, *scope))
+        for grant in user.grants
+    )
+
+
+def _responder_grants(user: User):
+    # Admin holds every permission for oversight, but is never a responder that work can be assigned to.
+    return (g for g in user.grants if g.role != Role.ADMIN and Permission.WORK in ROLE_PERMISSIONS[g.role])
+
+
+def is_current_assignee(user: User, ticket: dict) -> bool:
+    """Acknowledge, resolve and work notes belong to the individually assigned responder only."""
+    if ticket.get("assigned_to_user_id") != user.subject:
+        return False
+    scope = _ticket_scope(ticket)
+    return any(grant_matches(grant, *scope) for grant in _responder_grants(user))
+
+
+def can_work_on(user: User, ticket: dict, *, team: str | None = None) -> bool:
+    """Whether `user` is an eligible assignee for the ticket (active responder whose grant covers its scope)."""
+    warehouse, area, ticket_team = _ticket_scope(ticket)
+    return is_active(user) and any(
+        grant_matches(grant, warehouse, area, team or ticket_team) for grant in _responder_grants(user)
+    )

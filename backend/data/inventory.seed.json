@@ -1,7 +1,20 @@
 {
-  "SKU-1001": {"available": 40, "quarantine": 0},
-  "SKU-1042": {"available": 25, "quarantine": 0},
-  "SKU-2003": {"available": 12, "quarantine": 0},
-  "SKU-3310": {"available": 60, "quarantine": 0},
-  "SKU-4500": {"available": 8, "quarantine": 0}
+  "SKU-1001": {"name": "Corrugated shipping box, small", "available": 40, "quarantine": 0, "reorder_point": 15},
+  "SKU-1042": {"name": "Corrugated shipping box, medium", "available": 25, "quarantine": 0, "reorder_point": 24},
+  "SKU-1088": {"name": "Corrugated shipping box, large", "available": 18, "quarantine": 0, "reorder_point": 12},
+  "SKU-1120": {"name": "Double-wall export carton", "available": 9, "quarantine": 0, "reorder_point": 10},
+  "SKU-2003": {"name": "Bottled water, 24-pack", "available": 12, "quarantine": 0, "reorder_point": 10},
+  "SKU-2017": {"name": "Canned tomatoes, case of 12", "available": 30, "quarantine": 0, "reorder_point": 15},
+  "SKU-2045": {"name": "Breakfast cereal, case of 8", "available": 22, "quarantine": 0, "reorder_point": 10},
+  "SKU-2290": {"name": "Paper towels, bulk roll pack", "available": 6, "quarantine": 0, "reorder_point": 8},
+  "SKU-3310": {"name": "Printer paper, A4 carton", "available": 60, "quarantine": 0, "reorder_point": 20},
+  "SKU-3356": {"name": "Envelopes, carton of 500", "available": 14, "quarantine": 0, "reorder_point": 10},
+  "SKU-3402": {"name": "Toner cartridge pack", "available": 4, "quarantine": 0, "reorder_point": 6},
+  "SKU-4500": {"name": "Small appliance, boxed", "available": 8, "quarantine": 0, "reorder_point": 10},
+  "SKU-4512": {"name": "Desk lamp, boxed", "available": 16, "quarantine": 0, "reorder_point": 8},
+  "SKU-4630": {"name": "Wireless router, boxed", "available": 11, "quarantine": 0, "reorder_point": 5},
+  "SKU-5101": {"name": "Cleaning supplies, mixed case", "available": 35, "quarantine": 0, "reorder_point": 12},
+  "SKU-5177": {"name": "Disposable gloves, carton", "available": 50, "quarantine": 0, "reorder_point": 20},
+  "SKU-6020": {"name": "Pallet stretch wrap roll", "available": 7, "quarantine": 0, "reorder_point": 6},
+  "SKU-6088": {"name": "Packing tape, case of 36", "available": 20, "quarantine": 0, "reorder_point": 8}
 }
