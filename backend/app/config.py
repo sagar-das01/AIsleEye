@@ -38,11 +38,15 @@ class Settings(BaseSettings):
     # The frontend runs on 3001 because local Langfuse uses 3000.
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 
-    oidc_issuer: str = ""
-    oidc_audience: str = ""
-    oidc_jwks_url: str = ""
-    rbac_users_file: Path = DATA_DIR / "access.json"
+    # Local demo sign-in: persona buttons, no credentials. Off by default and independent of DEMO_MODE.
+    demo_sign_in_enabled: bool = False
+    session_file: Path = DATA_DIR / "sessions.json"
+    session_ttl_hours: int = Field(8, ge=1, le=24)
+    # Plain-HTTP localhost needs a non-Secure cookie; any phone-over-LAN demo must use HTTPS and set this true.
+    session_cookie_secure: bool = False
+    rbac_users_file: Path = DATA_DIR / "users.json"
     rbac_warehouse_id: str = Field("default", min_length=1, max_length=100)
+    inventory_max_adjust: int = Field(20, ge=1)
 
     agent_runtime: Literal["langchain", "plain", "rules"] = "langchain"
     demo_mode: Literal["", "replay"] = ""
@@ -59,9 +63,9 @@ class Settings(BaseSettings):
     score_weights: dict[str, float] = {"validity": 0.4, "guard_clean": 0.4, "within_cap": 0.2}
     mlflow_tracking_uri: str = "sqlite:///data/mlflow/mlflow.db"
 
-    @field_validator("rbac_users_file")
+    @field_validator("rbac_users_file", "session_file")
     @classmethod
-    def _anchor_access_file(cls, value: Path) -> Path:
+    def _anchor_data_files(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT_DIR / value
 
     @model_validator(mode="after")

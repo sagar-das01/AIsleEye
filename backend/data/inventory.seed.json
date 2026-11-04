@@ -1,7 +1,7 @@
 {
-  "SKU-1001": {"available": 40, "quarantine": 0},
-  "SKU-1042": {"available": 25, "quarantine": 0},
-  "SKU-2003": {"available": 12, "quarantine": 0},
-  "SKU-3310": {"available": 60, "quarantine": 0},
-  "SKU-4500": {"available": 8, "quarantine": 0}
+  "SKU-1001": {"available": 40, "quarantine": 0, "reorder_point": 15},
+  "SKU-1042": {"available": 25, "quarantine": 0, "reorder_point": 24},
+  "SKU-2003": {"available": 12, "quarantine": 0, "reorder_point": 10},
+  "SKU-3310": {"available": 60, "quarantine": 0, "reorder_point": 20},
+  "SKU-4500": {"available": 8, "quarantine": 0, "reorder_point": 10}
 }

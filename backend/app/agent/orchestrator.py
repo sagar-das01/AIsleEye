@@ -11,7 +11,7 @@ from app import audit, observability, scoring
 from app.agent import rules, tools
 from app.clients import get_chat_model
 from app.config import BACKEND_DIR, get_settings
-from app.guard import Guard
+from app.guard import ACTIVE_STATUSES, Guard
 from app.pipeline.inspect import prompt_version as inspect_prompt_version
 from app.sanitize import sanitize_text
 from app.schemas import ScanResult
@@ -105,9 +105,10 @@ def trace_id_for(scan_id: str) -> str:
 # ---- executing one proposed call: validate, guard, run, audit -------------------------------------------------------
 
 class _Executor:
-    def __init__(self, scan_id: str, guard: Guard):
+    def __init__(self, scan_id: str, guard: Guard, context: dict[str, dict] | None = None):
         self.scan_id = scan_id
         self.guard = guard
+        self.context = context or {}
         self.actions: list[ActionRecord] = []
         self.duplicates = 0
 
@@ -158,7 +159,7 @@ class _Executor:
 
     def _execute(self, name: str, data: dict) -> dict:
         if name == "create_incident_ticket":
-            ticket = tools.create_incident_ticket(**data, scan_id=self.scan_id)
+            ticket = tools.create_incident_ticket(**data, scan_id=self.scan_id, trusted=self.context.get(data["finding_id"]))
             ticket.pop("pdf_path")
             return {**ticket, "pdf_url": f"/tickets/{ticket['ticket_id']}.pdf"}
         finding_id = data.pop("finding_id")
@@ -299,6 +300,7 @@ def run_approved_scan(
     step: Callable[[list[dict]], list[ToolCall]] | None = None,
     skus: dict[str, str] | None = None,
     guard: Guard | None = None,
+    details: dict[str, dict] | None = None,
 ) -> RunResult:
     """Single entry point for an approved scan: run the agent, route every tool call through the guard, audit it."""
     settings = get_settings()
@@ -310,7 +312,7 @@ def run_approved_scan(
     approved = [i for i in dict.fromkeys(approved_ids) if i in by_id]
 
     inventory = tools.read_inventory()
-    open_tickets = [t for t in tools.list_tickets() if t.get("status") == "open"]
+    open_tickets = [t for t in tools.list_tickets() if t.get("status") in ACTIVE_STATUSES]
     guard = guard or Guard(
         scan_id=scan.scan_id,
         approved_ids=approved,
@@ -319,7 +321,8 @@ def run_approved_scan(
         open_tickets=open_tickets,
         max_tool_calls=settings.guard_max_tool_calls,
     )
-    executor = _Executor(scan.scan_id, guard)
+    context = _trusted_context(scan, details or {})
+    executor = _Executor(scan.scan_id, guard, context)
     result = RunResult(trace_id=trace_id_for(scan.scan_id))
     system, user = system_prompt(), build_user_message(scan, approved, inventory, open_tickets)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -343,7 +346,7 @@ def run_approved_scan(
                 # The model failed before anything happened, so the built-in rules can dispatch without double actions.
                 logger.warning("Agent model unavailable; dispatching with the built-in rules")
                 result = RunResult(trace_id=result.trace_id, fallback="rules", runtime="rules")
-                executor = _Executor(scan.scan_id, _fresh_guard(scan, approved, settings))
+                executor = _Executor(scan.scan_id, _fresh_guard(scan, approved, settings), context)
                 _run_rules(scan, approved, executor, messages, result)
         result.actions = executor.actions
         result.latency_ms = round((time.perf_counter() - started) * 1000)
@@ -353,6 +356,18 @@ def run_approved_scan(
         })
     _record_scores(scan.scan_id, approved, result, executor, settings)
     return result
+
+
+def _trusted_context(scan: ScanResult, details: dict[str, dict]) -> dict[str, dict]:
+    """Ticket metadata from the scan and the supervisor; the agent cannot set or alter any of it."""
+    return {
+        f.id: {
+            "finding_type": f.type, "sku": f.sku,
+            "location": (details.get(f.id) or {}).get("location"),
+            "instructions": (details.get(f.id) or {}).get("instructions"),
+        }
+        for f in scan.findings
+    }
 
 
 def _record_scores(scan_id: str, approved: list[str], result: RunResult, executor: _Executor, settings) -> None:
@@ -388,7 +403,7 @@ def _fresh_guard(scan: ScanResult, approved: list[str], settings) -> Guard:
         approved_ids=approved,
         units_by_finding={f.id: 1 for f in scan.findings if f.type == "box_damage"},
         stock={sku: item["available"] for sku, item in inventory.items()},
-        open_tickets=[t for t in tools.list_tickets() if t.get("status") == "open"],
+        open_tickets=[t for t in tools.list_tickets() if t.get("status") in ACTIVE_STATUSES],
         max_tool_calls=settings.guard_max_tool_calls,
     )
 

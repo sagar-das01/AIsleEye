@@ -2,6 +2,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 ALLOWED_TOOLS = ("create_incident_ticket", "adjust_inventory", "log_compliance_event")
+# Acknowledged work is still active: a second ticket for the same finding would duplicate it.
+ACTIVE_STATUSES = frozenset({"open", "in_progress"})
 
 
 @dataclass(frozen=True)
@@ -75,8 +77,8 @@ class Guard:
             return _reject(f"A ticket for {finding_id} was already created in this run.")
         for ticket in self._open_tickets:
             same_scan = ticket.get("scan_id", self.scan_id) == self.scan_id
-            if same_scan and ticket.get("finding_id") == finding_id and ticket.get("status", "open") == "open":
-                return _reject(f"Duplicate of open ticket {ticket.get('ticket_id')}.", duplicate_of=ticket.get("ticket_id"))
+            if same_scan and ticket.get("finding_id") == finding_id and ticket.get("status", "open") in ACTIVE_STATUSES:
+                return _reject(f"Duplicate of active ticket {ticket.get('ticket_id')}.", duplicate_of=ticket.get("ticket_id"))
         self._ticketed.add(finding_id)
         return Verdict(True)
 

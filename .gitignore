@@ -16,6 +16,9 @@ backend/data/audit_log.jsonl
 backend/data/tickets/
 backend/data/approvals/
 backend/data/access.json
+backend/data/users.json
+backend/data/sessions.json
+backend/data/reconciles/
 datasets/
 backend/data/feedback.jsonl
 backend/data/mlflow/
