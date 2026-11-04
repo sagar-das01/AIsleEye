@@ -27,3 +27,19 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* One short pulse on a blocked-walkway box; never repeating, and off for reduced-motion users. */
+@keyframes pulse-once {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.pulse-once {
+  animation: pulse-once 0.9s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-once {
+    animation: none;
+  }
+}

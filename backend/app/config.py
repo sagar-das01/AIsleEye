@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     # SAM matches short noun phrases literally; "floor tape" found nothing on the test scene, a colour did.
     walkway_concept: str = "yellow line"
     request_timeout_s: float = 90.0
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # The frontend runs on 3001 because local Langfuse uses 3000.
+    cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 
     agent_runtime: Literal["langchain", "plain"] = "langchain"
     demo_mode: Literal["", "replay"] = ""
