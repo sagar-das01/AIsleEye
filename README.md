@@ -369,6 +369,19 @@ Create the deployment-controlled, git-ignored access directory before use:
 
 Replace subjects with exact provider subject identifiers. Provision the first admin explicitly; public signup cannot grant access. Relative directory paths resolve from the repository root regardless of backend working directory. Keep the file readable only by the service and deployment administrators, use atomic replacement when updating it, and do not commit real identities. User records are reloaded on every request, so disabling access or removing grants takes effect on the next request without waiting for token expiry.
 
+For the MVP the directory is just this JSON file; there is no database. Instead of editing it by hand, use the CLI (from `backend/`), which validates every change against the same model the API uses and writes atomically (the file stays owner-only):
+
+```bash
+.venv/bin/python -m scripts.access add SUBJECT --name "Ada Admin" --role admin        # the first admin creates the file
+.venv/bin/python -m scripts.access add SUBJECT --name "Tess" --role technician --team Maintenance --expires 2027-01-31T00:00:00+00:00
+.venv/bin/python -m scripts.access grant SUBJECT --role auditor --area dock          # another grant for the same person
+.venv/bin/python -m scripts.access revoke SUBJECT --role auditor --area dock
+.venv/bin/python -m scripts.access disable SUBJECT      # also: enable, remove
+.venv/bin/python -m scripts.access list
+```
+
+`--warehouse` defaults to `RBAC_WAREHOUSE_ID`. The CLI refuses to disable, remove or revoke the last active admin (`--force` overrides) and never overwrites a file it cannot parse. Changes apply on the next request. Moving users to a database later means replacing only the directory loading in `app/auth.py`.
+
 Each user can have multiple grants. Each grant independently binds a role to a warehouse and optional `area_id` and `team`; scopes from separate grants are never combined. An optional timezone-aware `expires_at` on the user limits access, particularly for contractors.
 
 ### Current permissions
