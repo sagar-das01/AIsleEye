@@ -7,9 +7,8 @@ from fastapi import APIRouter, HTTPException, Path, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import audit
+from app import audit, replay
 from app.agent import orchestrator, tools
-from app.pipeline.scan import load_cached
 from app.storage import read_json, write_json
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ def _approval_key(scan_id: str, finding_ids: list[str]) -> str:
 
 @router.post("/scan/{scan_id}/approve")
 def approve(scan_id: Annotated[str, SCAN_ID], body: ApproveRequest, response: Response) -> dict:
-    scan = load_cached(scan_id)
+    scan = replay.find_scan(scan_id)
     if scan is None:
         raise HTTPException(404, "Scan not found.")
     unknown = sorted(set(body.finding_ids) - {f.id for f in scan.findings})

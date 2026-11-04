@@ -73,3 +73,16 @@ describe("summarizeArgs", () => {
     expect(summarizeArgs({})).toBe("");
   });
 });
+
+describe("describeError for missing results", () => {
+  it("uses the server's reason for a 404 and does not offer a retry", () => {
+    expect(describeError(new ApiError("x", 404, "No saved replay result for this photo."))).toEqual({
+      message: "No saved replay result for this photo.",
+      retryable: false,
+    });
+  });
+
+  it("has a fallback message for a 404 without a reason", () => {
+    expect(describeError(new ApiError("x", 404)).retryable).toBe(false);
+  });
+});

@@ -36,6 +36,7 @@ export interface ScanResult {
   objects: DetectedObject[];
   findings: Finding[];
   timings_ms: Record<string, number>;
+  replay?: boolean;
 }
 
 export type ActionStatus = "executed" | "rejected" | "invalid" | "failed";
@@ -65,6 +66,17 @@ export interface ApproveResult {
   iterations: number;
   within_iteration_cap: boolean;
   summary: string | null;
+  fallback?: string | null;
+}
+
+export interface DemoPhoto {
+  id: string;
+  title: string;
+  description: string;
+  sku: string | null;
+  scan_id: string;
+  image_url: string;
+  pinned: boolean;
 }
 
 export type Inventory = Record<string, { available: number; quarantine: number }>;
@@ -72,6 +84,7 @@ export type Inventory = Record<string, { available: number; quarantine: number }
 export interface Health {
   status: string;
   models: { vision_agent: string; segmentation: string };
+  demo_mode?: string;
 }
 
 export class ApiError extends Error {
@@ -115,6 +128,12 @@ export const api = {
     }),
   tickets: () => request<Ticket[]>("/tickets"),
   inventory: () => request<Inventory>("/inventory"),
+  demos: () => request<DemoPhoto[]>("/demo"),
+  demoPhoto: async (demo: Pick<DemoPhoto, "id" | "image_url">): Promise<File> => {
+    const res = await fetch(`${API_URL}${demo.image_url}`, { cache: "no-store" });
+    if (!res.ok) throw new ApiError(`GET ${demo.image_url} failed: ${res.status}`, res.status);
+    return new File([await res.arrayBuffer()], `${demo.id}.jpg`, { type: "image/jpeg" });
+  },
 };
 
 export function pdfUrl(ticket: Pick<Ticket, "pdf_url">): string {

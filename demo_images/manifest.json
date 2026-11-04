@@ -1,0 +1,72 @@
+[
+  {
+    "id": "clean_pallet_a",
+    "title": "Clean pallet",
+    "description": "Two tidy stacks well clear of the marked walkway.",
+    "expected": {
+      "damaged": 0,
+      "blocked": 0
+    },
+    "sku": null
+  },
+  {
+    "id": "clean_pallet_b",
+    "title": "Clean aisle",
+    "description": "Boxes in a row along the back, walkway clear.",
+    "expected": {
+      "damaged": 0,
+      "blocked": 0
+    },
+    "sku": null
+  },
+  {
+    "id": "damaged_crushed",
+    "title": "Crushed corner",
+    "description": "One box with a caved-in top corner on an otherwise tidy stack.",
+    "expected": {
+      "damaged": 1,
+      "blocked": 0
+    },
+    "sku": "SKU-1042"
+  },
+  {
+    "id": "damaged_wet",
+    "title": "Water damage and a tear",
+    "description": "A water-stained box and one with a torn side.",
+    "expected": {
+      "damaged": 2,
+      "blocked": 0
+    },
+    "sku": "SKU-2003"
+  },
+  {
+    "id": "blocked_aisle",
+    "title": "Blocked walkway",
+    "description": "A box standing in the yellow pedestrian lane.",
+    "expected": {
+      "damaged": 0,
+      "blocked": 1
+    },
+    "sku": null
+  },
+  {
+    "id": "blocked_two",
+    "title": "Two boxes in the lane",
+    "description": "A stack and a single box both sitting on the walkway.",
+    "expected": {
+      "damaged": 0,
+      "blocked": 2
+    },
+    "sku": null
+  },
+  {
+    "id": "hero_mixed",
+    "title": "Mixed scene",
+    "description": "A damaged box, a box blocking the walkway and tidy stock.",
+    "expected": {
+      "damaged": 1,
+      "blocked": 1
+    },
+    "sku": "SKU-3310"
+  }
+]

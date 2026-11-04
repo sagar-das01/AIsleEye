@@ -51,7 +51,7 @@ AIsleEye collapses that into one scan with a human in the loop.
 3. **Protect privacy** 🚧 — people in the photo are segmented and blurred before anything is stored, cropped or passed to later stages.
 4. **Segment** — SAM 3.1 is prompted with concepts such as `cardboard box` and `floor tape`, returning a box and a pixel mask for every instance.
 5. **Inspect** — each box crop is sent to Muse Spark with a strict JSON schema (`damaged`, `damage_type`, `severity`, `confidence`, `reason`).
-6. **Detect hazards** — walkway blockage is computed **geometrically** (box mask ∩ walkway region), not guessed by a model, so it is deterministic and explainable. A box standing on tape hides the tape under it, so the tape mask is closed over gaps up to the box's own size before the overlap is measured; a box is flagged when more than 15% of its area lies on the walkway.
+6. **Detect hazards** — walkway blockage is computed **geometrically** (box mask ∩ walkway region), not guessed by a model, so it is deterministic and explainable. A box standing on tape hides the tape under it, so each walkway mask is first closed over gaps up to the box's own size; weak matches (below `WALKWAY_MIN_CONFIDENCE`) are ignored, and separate markings are never bridged. Overlap is measured in the photo, so a box in front of a lane can look like one on it; shoot from above where you can. A box standing on tape hides the tape under it, so the tape mask is closed over gaps up to the box's own size before the overlap is measured; a box is flagged when more than 15% of its area lies on the walkway.
 7. **Review** — findings are shown on the image overlay with severity and confidence. Low-confidence results and scans with nothing detected are flagged **needs human review** 🚧. The supervisor approves, rejects or corrects each finding, and rejections are kept as feedback 🚧.
 8. **Guard** 🚧 — an action guard checks every tool call the agent proposes against the approved findings before it runs.
 9. **Dispatch** — a LangChain agent (Muse Spark, LangGraph runtime) calls tools to create a PDF incident ticket, move damaged units to quarantine and append a compliance log entry. Every tool argument is validated before execution, and each action is written to an append-only audit log 🚧.
@@ -102,7 +102,7 @@ flowchart TD
   SCORES --> MLF
 ```
 
-The privacy blur, action guard, feedback log and audit log are planned (Phase 5); Langfuse tracing, scoring and MLflow evaluation are planned (Phase 6); the pinned demo store and replay mode are planned (Phase 4); the rest follows Phases 1 to 3.
+The privacy blur, action guard, feedback log and audit log are planned (Phase 5); Langfuse tracing, scoring and MLflow evaluation are planned (Phase 6); the the rest, including the pinned demo store and replay mode, is built.
 
 ## Tech stack
 
@@ -214,6 +214,25 @@ npm run dev
 
 Open <http://localhost:3001> (port 3000 is left to the optional local Langfuse). The status indicator in the header turns green when the backend is reachable.
 
+**Demo photos and offline replay**
+
+[`demo_images/`](demo_images) holds seven demo photos (two clean, two damaged, two with a box in the walkway and one mixed scene). They are drawn by [`backend/scripts/make_demo_images.py`](backend/scripts/make_demo_images.py), so they are synthetic and carry no third-party licence; real warehouse photos still need testing. Pick one under "Or try a demo photo" in the dashboard.
+
+Each demo photo has a pinned result in `backend/data/demo/`, named by the hash of the photo. To run the whole demo with no network and no model:
+
+```bash
+DEMO_MODE=replay .venv/bin/uvicorn app.main:app --port 8000   # from backend/
+```
+
+In replay mode `POST /scan` answers only from the pinned store (then the cache), `/approve` dispatches with the built-in rules instead of the AI agent (same guard, same audit log), and the dashboard shows a replay banner for the whole session. A photo with no saved result gets a clear message, never an invented one. Outside replay mode a failing model API also falls back to the pinned result for a demo photo (banner included), and an approval whose AI agent fails before acting falls back to the rules.
+
+```bash
+.venv/bin/python -m scripts.make_demo_images        # redraw the photos and manifest
+.venv/bin/python -m scripts.freeze_demo [name ...]  # re-run them live and re-pin the results
+```
+
+Re-freeze whenever preprocessing, the walkway settings or the thresholds change.
+
 **Using the dashboard**
 
 1. Take a photo (the rear camera opens on a phone) or choose one from the gallery. Photos must be JPEG, PNG or WebP and at most 10 MB.
@@ -245,7 +264,7 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 |---|---|---|---|
 | GET | `/health` | ✅ available | Liveness and configured models |
 | POST | `/scan` | ✅ available | Image → segmented boxes, walkway mask and findings |
-| GET | `/scan/{scan_id}` | ✅ available | Cached scan result (demo replay) |
+| GET | `/scan/{scan_id}` | ✅ available | Cached scan result, or the pinned demo result flagged `replay: true` |
 | POST | `/scan/{scan_id}/approve` | ✅ available | Body `{finding_ids, skus?}` (`skus` maps a finding to the SKU the supervisor entered). Runs the agent; returns actions with their status, tickets, summary and a `trace_id`; idempotent, so a repeat call returns the first result (`Idempotent-Replay: true`) |
 | GET | `/inventory` | ✅ available | Current inventory, including quarantine |
 | GET | `/tickets` | ✅ available | Incident tickets |
@@ -254,6 +273,8 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | POST | `/scan/{scan_id}/feedback` | 🚧 planned | Reject or correct a finding, with a reason; also records a pipeline score on the scan's trace |
 | DELETE | `/scan/{scan_id}` | 🚧 planned | Purge a cached scan |
 | GET | `/audit` | ✅ available | Audit log of agent actions |
+| GET | `/demo` | ✅ available | The demo photos, each with its scan id and whether a saved result exists |
+| GET | `/demo/{name}.jpg` | ✅ available | One demo photo, byte for byte (its hash is the scan id of the saved result) |
 | GET | `/scores` | 🚧 planned | Pipeline score and agent score summaries: components, sample sizes, breakdown by prompt version |
 | POST | `/tickets/{ticket_id}/feedback` | 🚧 planned (optional) | Rate a created ticket, with an optional corrected team or severity; feeds the agent score |
 
@@ -308,7 +329,7 @@ gh pr create --base master --fill
 - [x] **Phase 1** — Vision pipeline: SAM 3.1 segmentation, box crops, damage inspection, geometric hazard detection, `/scan`
 - [x] **Phase 2** — Agent and tools: LangChain agent, ticket PDFs, inventory quarantine, compliance log, idempotent `/approve`, safe file writes
 - [x] **Phase 3** — Frontend: phone camera upload, mask overlays that do not rely on colour alone, findings review, agent action timeline, live KPIs, main empty and error states. Reject and correct buttons, the replay banner and the score cards arrive with Phases 4 to 6
-- [ ] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner
+- [x] **Phase 4** — Demo assets, a pinned demo store and offline replay mode with a visible replay banner (re-run `scripts.freeze_demo` after the Phase 5 privacy blur lands)
 - [ ] **Phase 5** — Data handling, privacy and guardrails: shared preprocessing, people blur, retention and purge, agent action guard, audit log, needs-review and feedback flow, dataset preparation and label audit
 - [ ] **Phase 6** — Agent observability, scoring and evaluation: Langfuse traces without image data, central orchestrator with separate pipeline and agent scores (reviewer feedback scores the vision stages, the agent score is automatic), both shown in the dashboard with their sample sizes, MLflow evaluation runs on audited labels
 - [ ] **Phase 7** — Hardening: timeouts and retries, prompt-injection regression cases, tracing and evaluation failure drills, accuracy evaluation on audited labels
@@ -362,7 +383,7 @@ All of this is planned (Phase 6) and optional: with no Langfuse keys, or MLflow 
 Planned (Phases 2 to 4 and 8); items marked 🚧 are not built yet.
 
 - **Safe state changes** 🚧 — inventory, ticket, compliance, audit, feedback and score files are written atomically (temp file, then rename, with a per-file lock). Approving a scan is idempotent: a repeated or double-clicked request returns the first result and creates no second ticket or inventory change.
-- **Demo replay** 🚧 — pre-run results for the demo images live in a pinned store that the retention purge never touches. Replay mode, or an unavailable API, serves them behind a visible "replay" banner; replayed results are never presented as live.
+- **Demo replay** — pre-run results for the demo images live in a pinned store (`backend/data/demo/`) that the retention purge 🚧 never touches. Replay mode, or an unavailable API, serves them behind a visible "replay" banner; replayed results are never presented as live.
 - **Latency** 🚧 — the target is under 20 seconds for a scan plus approval. In testing, a trivial Muse Spark reply took 13.7 seconds at default reasoning, so inspection and the agent use a low reasoning effort, the SAM calls run concurrently, all crops go in one inspection request, and every stage's time is recorded.
 - **Phone-first** 🚧 — upload takes a photo from the phone camera or the gallery, and narrow screens get a single-column layout with large touch targets.
 - **Accessible overlays** 🚧 — colour is never the only signal: damaged boxes use red with a hatched fill and an icon, blocked walkways a yellow dashed outline and an icon, and every finding has a text label. Nothing flashes, and reduced-motion settings are honoured.

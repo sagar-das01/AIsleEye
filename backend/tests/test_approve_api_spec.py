@@ -128,11 +128,25 @@ def test_a_failed_run_does_not_poison_the_idempotency_key(world, monkeypatch):
         raise RuntimeError("model down")
 
     monkeypatch.setattr(orch, "default_step", boom)
-    assert approve(["dmg_box_1"]).status_code == 502
+    first = approve(["dmg_box_1"])
+    # With the model down the built-in rules dispatch, and that result is the stored one.
+    assert first.status_code == 200 and first.json()["fallback"] == "rules" and len(first.json()["tickets"]) == 1
     monkeypatch.setattr(orch, "default_step", working)
-    # After the outage a retry must be allowed to run for real.
-    retry = approve(["dmg_box_1"])
-    assert retry.status_code == 200 and len(retry.json()["tickets"]) == 1
+    assert approve(["dmg_box_1"]).json() == first.json()
+
+
+def test_a_run_that_fails_after_acting_is_a_502_and_is_not_stored(world, monkeypatch):
+    calls = iter([[orch.ToolCall("create_incident_ticket", dict(finding_id="dmg_box_1", title="t", severity="medium", assignee_team="Maintenance", description="d"))]])
+
+    def half(messages):
+        try:
+            return next(calls)
+        except StopIteration:
+            raise RuntimeError("model down") from None
+
+    monkeypatch.setattr(orch, "default_step", half)
+    assert approve(["dmg_box_1"]).status_code == 502
+    assert not list((world / "approvals").glob("*.json")) if (world / "approvals").exists() else True
 
 
 # ---- read endpoints -------------------------------------------------------------------------------------------

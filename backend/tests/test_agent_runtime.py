@@ -112,7 +112,25 @@ def test_langchain_runtime_turns_a_model_failure_into_an_error_result(scan, monk
 
     monkeypatch.setattr(orch, "get_chat_model", lambda model=None: Broken())
     result = orch.run_approved_scan(scan, ["dmg_box_1"])
-    assert result.error == "model_error" and result.actions == []
+    # Nothing had happened yet, so the built-in rules take over instead of failing the approval.
+    assert result.error is None and result.fallback == "rules"
+    assert [a.status for a in result.actions] == ["executed"]
+
+
+def test_a_model_failure_after_an_action_is_an_error_not_a_second_dispatch(scan, monkeypatch):
+    set_runtime(monkeypatch, "plain")
+    rounds = iter([[orch.ToolCall("create_incident_ticket", ticket_args())]])
+
+    def step(messages):
+        try:
+            return next(rounds)
+        except StopIteration:
+            raise RuntimeError("api down") from None
+
+    monkeypatch.setattr(orch, "default_step", step)
+    result = orch.run_approved_scan(scan, ["dmg_box_1"])
+    assert result.error == "model_error" and result.fallback is None
+    assert [a.status for a in result.actions] == ["executed"]
 
 
 def test_the_model_sees_the_three_tools_and_only_those(scan, monkeypatch):

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from app import audit
-from app.agent import tools
+from app.agent import rules, tools
 from app.clients import get_chat_model
 from app.config import BACKEND_DIR, get_settings
 from app.guard import Guard
@@ -88,6 +88,7 @@ class RunResult:
     prompt_version: str = PROMPT_VERSION
     error: str | None = None
     summary: str | None = None
+    fallback: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -247,8 +248,8 @@ def _run_langchain(executor: _Executor, system: str, user: str, result: RunResul
         StructuredTool(name=name, description=desc, args_schema=model.model_json_schema(), func=make(name))
         for name, (model, desc) in TOOL_MODELS.items()
     ]
-    agent = create_agent(get_chat_model(), tools=lc_tools, system_prompt=system)
     try:
+        agent = create_agent(get_chat_model(), tools=lc_tools, system_prompt=system)
         out = agent.invoke(
             {"messages": [{"role": "user", "content": user}]}, config={"recursion_limit": 2 * MAX_ITERATIONS + 1}
         )
@@ -302,10 +303,47 @@ def run_approved_scan(
     executor = _Executor(scan.scan_id, guard)
     result = RunResult(trace_id=trace_id_for(scan.scan_id))
     system, user = system_prompt(), build_user_message(scan, approved, inventory, open_tickets)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
-    if step is None and settings.agent_runtime == "langchain":
+    use_rules = step is None and (settings.demo_mode == "replay" or settings.agent_runtime == "rules")
+    if use_rules:
+        _run_rules(scan, approved, executor, messages, result)
+    elif step is None and settings.agent_runtime == "langchain":
         _run_langchain(executor, system, user, result)
     else:
-        _run_plain(step or default_step, executor, [{"role": "system", "content": system}, {"role": "user", "content": user}], result)
+        _run_plain(step or default_step, executor, messages, result)
+
+    if result.error and step is None and not use_rules and not any(a.status == "executed" for a in executor.actions):
+        # The model failed before anything happened, so the built-in rules can dispatch without double actions.
+        logger.warning("Agent model unavailable; dispatching with the built-in rules")
+        result = RunResult(trace_id=result.trace_id, fallback="rules")
+        executor = _Executor(scan.scan_id, _fresh_guard(scan, approved, settings))
+        _run_rules(scan, approved, executor, messages, result)
     result.actions = executor.actions
     return result
+
+
+def _fresh_guard(scan: ScanResult, approved: list[str], settings) -> Guard:
+    inventory = tools.read_inventory()
+    return Guard(
+        scan_id=scan.scan_id,
+        approved_ids=approved,
+        units_by_finding={f.id: 1 for f in scan.findings if f.type == "box_damage"},
+        stock={sku: item["available"] for sku, item in inventory.items()},
+        open_tickets=[t for t in tools.list_tickets() if t.get("status") == "open"],
+        max_tool_calls=settings.guard_max_tool_calls,
+    )
+
+
+def _run_rules(scan: ScanResult, approved: list[str], executor: _Executor, messages: list[dict], result: RunResult) -> None:
+    pending = [ToolCall(name, args) for name, args in rules.plan(scan, approved)]
+    sent = False
+
+    def step(_: list[dict]) -> list[ToolCall]:
+        nonlocal sent
+        calls, sent = ([] if sent else pending), True
+        return calls
+
+    _run_plain(step, executor, messages, result)
+    done = sum(1 for a in executor.actions if a.status == "executed")
+    result.summary = f"Dispatched {done} of {len(executor.actions)} action(s) with the built-in rules."

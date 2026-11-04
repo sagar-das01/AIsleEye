@@ -25,6 +25,11 @@ export function ActionTimeline({ result }: { result: ApproveResult }) {
         ))}
       </ol>
       {result.summary && <p className="text-sm text-zinc-300">{result.summary}</p>}
+      {result.fallback === "rules" && (
+        <p role="status" className="text-xs text-hazard">
+          The AI agent was unavailable, so the built-in rules dispatched these actions.
+        </p>
+      )}
       {!result.within_iteration_cap && (
         <p role="status" className="text-xs text-hazard">
           The agent stopped at its step limit; some actions may be missing.

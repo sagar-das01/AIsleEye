@@ -94,4 +94,18 @@ describe("FindingsList", () => {
     expect(screen.getByText("No damage or blocked walkways found.")).toBeDefined();
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("prefills the suggested SKU on damaged boxes only and sends it on approve", () => {
+    const onApprove = setup({ defaultSku: "SKU-1042" });
+    expect((screen.getByPlaceholderText("e.g. SKU-1042") as HTMLInputElement).value).toBe("SKU-1042");
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], { dmg_box_0: "SKU-1042" });
+  });
+
+  it("lets the supervisor clear a suggested SKU", () => {
+    const onApprove = setup({ defaultSku: "SKU-1042" });
+    fireEvent.change(screen.getByPlaceholderText("e.g. SKU-1042"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    expect(onApprove).toHaveBeenCalledWith(["dmg_box_0", "hz_box_2"], {});
+  });
 });
