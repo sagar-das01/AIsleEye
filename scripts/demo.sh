@@ -61,11 +61,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [[ "$mode" == "replay" ]]; then export DEMO_MODE=replay; fi
-(cd "$root/backend" && exec "$python" -m uvicorn app.main:app --port "$backend_port" >"$log_dir/backend.log" 2>&1) &
+# The dashboard has no sign-in yet. This session-only switch lets direct localhost requests act as an admin, and the
+# server listens on loopback only; it is never written to .env.
+export DEMO_AUTH_BYPASS=true
+(cd "$root/backend" && exec "$python" -m uvicorn app.main:app --host 127.0.0.1 --port "$backend_port" >"$log_dir/backend.log" 2>&1) &
 pids+=($!)
 
-if [[ ! -f "$root/frontend/.next/BUILD_ID" ]]; then
-  echo "Building the frontend (first run only)..."
+build_id="$root/frontend/.next/BUILD_ID"
+if [[ ! -f "$build_id" ]] || [[ -n "$(find "$root/frontend/src" "$root/frontend/package.json" -newer "$build_id" -print -quit)" ]]; then
+  echo "Building the frontend (first run, or the source changed)..."
   (cd "$root/frontend" && NEXT_PUBLIC_API_URL="http://localhost:$backend_port" npm run build >"$log_dir/frontend-build.log" 2>&1) \
     || fail "frontend build failed; see $log_dir/frontend-build.log"
 fi

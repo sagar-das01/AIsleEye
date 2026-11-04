@@ -98,6 +98,7 @@ export interface Health {
   status: string;
   models: { vision_agent: string; segmentation: string };
   demo_mode?: string;
+  auth_bypass?: boolean;
 }
 
 export class ApiError extends Error {

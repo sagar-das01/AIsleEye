@@ -321,6 +321,18 @@ describe("Dashboard: demo photos and replay", () => {
     expect(screen.queryByLabelText("Replay notice")).toBeNull();
   });
 
+  it("says plainly when sign-in is switched off for a local demo session, and otherwise says nothing", async () => {
+    await upload();
+    await screen.findByText("Damaged box");
+    expect(screen.queryByLabelText("Demo access notice")).toBeNull();
+    cleanup();
+    vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "", auth_bypass: true });
+    render(<Dashboard />);
+    const notice = await screen.findByLabelText("Demo access notice");
+    expect(notice.textContent).toMatch(/sign-in is switched off/);
+    expect(notice.textContent).toMatch(/Local use only/);
+  });
+
   it("shows a clear replay banner for the whole session when the backend is in replay mode", async () => {
     vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "replay" });
     vi.spyOn(api, "demos").mockResolvedValue(DEMOS);

@@ -304,7 +304,7 @@ The **CI** workflow runs backend tests, frontend lint, tests and production buil
 | GET | `/scores` | ✅ available | Pipeline agreement and agent score with sample sizes (a value only once `SCORE_MIN_REVIEWS` is reached), components, and a breakdown by prompt version |
 | POST | `/tickets/{ticket_id}/feedback` | 🚧 planned (optional) | Rate a created ticket, with an optional corrected team or severity; feeds the agent score |
 
-All data endpoints require an OIDC bearer token; only `/health` and the API documentation/schema are public. Replay mode enforces the same permissions.
+All data endpoints require an OIDC bearer token; only `/health` and the API documentation/schema are public. Replay mode enforces the same permissions; the one exception is the local demo switch described under [Local demo access](#local-demo-access).
 
 **Finding schema**
 
@@ -383,6 +383,10 @@ For the MVP the directory is just this JSON file; there is no database. Instead 
 `--warehouse` defaults to `RBAC_WAREHOUSE_ID`. The CLI refuses to disable, remove or revoke the last active admin (`--force` overrides) and never overwrites a file it cannot parse. Changes apply on the next request. Moving users to a database later means replacing only the directory loading in `app/auth.py`.
 
 Each user can have multiple grants. Each grant independently binds a role to a warehouse and optional `area_id` and `team`; scopes from separate grants are never combined. An optional timezone-aware `expires_at` on the user limits access, particularly for contractors.
+
+### Local demo access
+
+The dashboard has no sign-in yet, so `scripts/demo.sh` starts the backend with `DEMO_AUTH_BYPASS=true` for that session only. With it, a request that arrives directly from this machine (a loopback address, no proxy headers) and carries no token is treated as an administrator named `demo-admin`. A request with a token, from another machine, or through a proxy still goes through normal OIDC authentication. The launcher also binds the server to `127.0.0.1`, the dashboard shows a notice while the switch is on, `/health` reports `auth_bypass`, and the backend logs a warning at startup. The switch defaults to off, is meant to be set only on the command line of a demo, and must not be put in a shared or deployed `.env`.
 
 ### Current permissions
 

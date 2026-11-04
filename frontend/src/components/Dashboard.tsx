@@ -36,6 +36,7 @@ export function Dashboard() {
   const [scores, setScores] = useState<Scores | null>(null);
   const [demos, setDemos] = useState<DemoPhoto[]>([]);
   const [demoMode, setDemoMode] = useState("");
+  const [authBypass, setAuthBypass] = useState(false);
   const [suggestedSku, setSuggestedSku] = useState<string | undefined>();
   const busy = useRef(false);
 
@@ -51,7 +52,10 @@ export function Dashboard() {
     void loadTotals();
     void Promise.allSettled([api.demos(), api.health()]).then(([d, h]) => {
       if (d.status === "fulfilled") setDemos(d.value);
-      if (h.status === "fulfilled") setDemoMode(h.value.demo_mode ?? "");
+      if (h.status === "fulfilled") {
+        setDemoMode(h.value.demo_mode ?? "");
+        setAuthBypass(h.value.auth_bypass === true);
+      }
     });
   }, [loadTotals]);
 
@@ -140,6 +144,12 @@ export function Dashboard() {
 
       <main className="grid flex-1 gap-6 p-4 sm:p-6 lg:grid-cols-[1fr_420px]">
         <section aria-label="Photo" className="flex min-h-[320px] flex-col gap-4 rounded-lg border border-dashed border-panel-border bg-panel p-3 lg:min-h-[480px]">
+          {authBypass && (
+            <p role="status" aria-label="Demo access notice" className="rounded-md border border-hazard bg-background p-3 text-sm text-hazard">
+              Demo session: sign-in is switched off and this browser acts as an administrator. Local use only.
+            </p>
+          )}
+
           {replaying && (
             <p role="status" aria-label="Replay notice" className="rounded-md border border-hazard bg-background p-3 text-sm text-hazard">
               ⟲ Showing replay results: saved from an earlier analysis, not a live scan.

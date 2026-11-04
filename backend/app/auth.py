@@ -145,8 +145,29 @@ def verify_token(token: str) -> str:
     return subject
 
 
-def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> User:
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+PROXY_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip")
+
+
+def demo_user(request: Request) -> User | None:
+    """The sign-in-free admin for a local demo, only for a direct loopback request that presents no token.
+
+    Anything behind a proxy, from another machine, or carrying a token goes through normal authentication.
+    """
+    settings = get_settings()
+    client = request.client.host if request.client else ""
+    if not settings.demo_auth_bypass or client not in LOOPBACK_HOSTS or any(h in request.headers for h in PROXY_HEADERS):
+        return None
+    return User(subject="demo-admin", display_name="Demo session (sign-in bypassed)", grants=[
+        Grant(role=Role.ADMIN, warehouse_id=settings.rbac_warehouse_id),
+    ])
+
+
+def current_user(request: Request, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> User:
     if credentials is None:
+        demo = demo_user(request)
+        if demo is not None:
+            return demo
         raise HTTPException(401, "Authentication required.", headers={"WWW-Authenticate": "Bearer"})
     subject = verify_token(credentials.credentials)
     try:

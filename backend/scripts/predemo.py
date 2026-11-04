@@ -76,15 +76,15 @@ def check_replay_offline() -> Result:
     from app import audit, config, main, replay, scoring
     from app.agent import tools
 
-    saved = {k: os.environ.get(k) for k in ("DEMO_MODE", "MODEL_API_BASE_URL")}
-    os.environ["DEMO_MODE"], os.environ["MODEL_API_BASE_URL"] = "replay", "http://127.0.0.1:9"
+    saved = {k: os.environ.get(k) for k in ("DEMO_MODE", "MODEL_API_BASE_URL", "DEMO_AUTH_BYPASS")}
+    os.environ.update(DEMO_MODE="replay", MODEL_API_BASE_URL="http://127.0.0.1:9", DEMO_AUTH_BYPASS="true")
     config.get_settings.cache_clear()
     originals = (tools.DATA_DIR, audit.AUDIT_PATH, scoring.SCORES_PATH)
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tools.DATA_DIR, audit.AUDIT_PATH, scoring.SCORES_PATH = Path(tmp), Path(tmp) / "audit.jsonl", Path(tmp) / "scores.jsonl"
             (Path(tmp) / "inventory.json").write_text((config.DATA_DIR / "inventory.seed.json").read_text())
-            client = TestClient(main.app)
+            client = TestClient(main.app, client=("127.0.0.1", 50000))  # as the dashboard on this machine would appear
             for e in replay.load_manifest():
                 data = replay.demo_image_path(e["id"]).read_bytes()
                 res = client.post("/scan", files={"image": (f"{e['id']}.jpg", data, "image/jpeg")})
