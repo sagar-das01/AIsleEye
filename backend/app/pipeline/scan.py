@@ -1,18 +1,22 @@
 import hashlib
 import io
+import logging
 import os
 import tempfile
 import time
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import ValidationError
 
 from app.clients import bytes_to_data_url
-from app.config import DATA_DIR
+from app.config import DATA_DIR, get_settings
 from app.pipeline.hazards import detect_blocked_walkways
 from app.pipeline.inspect import damage_findings, inspect_boxes
 from app.pipeline.segment import segment_all
 from app.schemas import DetectedObject, ImageSize, ScanResult
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR: Path = DATA_DIR / "cache"
 ALLOWED_MIME_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
@@ -66,7 +70,12 @@ def load_cached(scan_id: str) -> ScanResult | None:
     path = _cache_path(scan_id)
     if not path.is_file():
         return None
-    return ScanResult.model_validate_json(path.read_text())
+    try:
+        return ScanResult.model_validate_json(path.read_text())
+    except (ValidationError, OSError, UnicodeDecodeError):
+        # A torn or old-schema file must not make the photo unscannable; the caller rescans and overwrites it.
+        logger.warning("Ignoring unreadable cache entry %s", path.name)
+        return None
 
 
 def _save_cached(result: ScanResult) -> None:
@@ -96,6 +105,8 @@ async def run_scan(image_bytes: bytes, mime: str) -> ScanResult:
     segments = await segment_all(data_url, width=width, height=height)
     timings["segment"] = _ms(t)
     boxes, walkways = segments["box"], segments["walkway"]
+    # "yellow line" also matches orange rack beams (confidence ~0.5, lanes ~0.85): weak matches are not walkways.
+    walkways = [w for w in walkways if w.confidence >= get_settings().walkway_min_confidence]
 
     t = time.perf_counter()
     bboxes = [b.bbox for b in boxes]

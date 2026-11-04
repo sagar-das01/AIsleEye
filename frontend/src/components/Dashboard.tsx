@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ActionTimeline } from "@/components/ActionTimeline";
+import { DemoGallery } from "@/components/DemoGallery";
 import { FindingsList } from "@/components/FindingsList";
 import { KpiStrip } from "@/components/KpiStrip";
 import { ScanOverlay } from "@/components/ScanOverlay";
 import { UploadPanel } from "@/components/UploadPanel";
-import { api, type ApproveResult, type Inventory, type ScanResult, type Ticket } from "@/lib/api";
+import { api, type ApproveResult, type DemoPhoto, type Inventory, type ScanResult, type Ticket } from "@/lib/api";
 import { describeError, type FriendlyError } from "@/lib/scan";
 
 type Phase = "idle" | "scanning" | "scanned" | "approving" | "approved";
 
 interface Failure extends FriendlyError {
-  action: { kind: "scan"; file: File } | { kind: "approve"; ids: string[]; skus: Record<string, string> };
+  action?: { kind: "scan"; file: File; sku?: string } | { kind: "approve"; ids: string[]; skus: Record<string, string> };
 }
 
 const STAGES: [number, string][] = [
@@ -32,6 +33,9 @@ export function Dashboard() {
   const [scans, setScans] = useState(0);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [inventory, setInventory] = useState<Inventory>({});
+  const [demos, setDemos] = useState<DemoPhoto[]>([]);
+  const [demoMode, setDemoMode] = useState("");
+  const [suggestedSku, setSuggestedSku] = useState<string | undefined>();
   const busy = useRef(false);
 
   const loadTotals = useCallback(async () => {
@@ -43,17 +47,22 @@ export function Dashboard() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch of the backend's totals
     void loadTotals();
+    void Promise.allSettled([api.demos(), api.health()]).then(([d, h]) => {
+      if (d.status === "fulfilled") setDemos(d.value);
+      if (h.status === "fulfilled") setDemoMode(h.value.demo_mode ?? "");
+    });
   }, [loadTotals]);
 
   useEffect(() => () => void (imageUrl && URL.revokeObjectURL(imageUrl)), [imageUrl]);
 
   const runScan = useCallback(
-    async (file: File) => {
+    async (file: File, sku?: string) => {
       if (busy.current) return;
       busy.current = true;
       setFailure(null);
       setResult(null);
       setScan(null);
+      setSuggestedSku(sku);
       setImageUrl(URL.createObjectURL(file));
       setPhase("scanning");
       setStage(STAGES[0][1]);
@@ -65,13 +74,25 @@ export function Dashboard() {
       } catch (error) {
         setPhase("idle");
         setImageUrl(null);
-        setFailure({ ...describeError(error), action: { kind: "scan", file } });
+        setFailure({ ...describeError(error), action: { kind: "scan", file, sku } });
       } finally {
         timers.forEach(clearTimeout);
         busy.current = false;
       }
     },
     [],
+  );
+
+  const runDemo = useCallback(
+    async (demo: DemoPhoto) => {
+      if (busy.current) return;
+      try {
+        await runScan(await api.demoPhoto(demo), demo.sku ?? undefined);
+      } catch {
+        setFailure({ message: "Couldn't load that demo photo. Check that the backend is running.", retryable: false });
+      }
+    },
+    [runScan],
   );
 
   const runApprove = useCallback(
@@ -94,9 +115,10 @@ export function Dashboard() {
     [scan, loadTotals],
   );
 
-  const retry = (action: Failure["action"]) =>
-    void (action.kind === "scan" ? runScan(action.file) : runApprove(action.ids, action.skus));
+  const retry = (action: NonNullable<Failure["action"]>) =>
+    void (action.kind === "scan" ? runScan(action.file, action.sku) : runApprove(action.ids, action.skus));
 
+  const replaying = demoMode === "replay" || scan?.replay === true;
   const boxes = scan?.objects.filter((o) => o.label === "box").length ?? 0;
   const hazards = scan?.findings.filter((f) => f.type === "walkway_blocked").length ?? 0;
   const quarantined = Object.values(inventory).reduce((sum, item) => sum + item.quarantine, 0);
@@ -114,11 +136,17 @@ export function Dashboard() {
 
       <main className="grid flex-1 gap-6 p-4 sm:p-6 lg:grid-cols-[1fr_420px]">
         <section aria-label="Photo" className="flex min-h-[320px] flex-col gap-4 rounded-lg border border-dashed border-panel-border bg-panel p-3 lg:min-h-[480px]">
+          {replaying && (
+            <p role="status" aria-label="Replay notice" className="rounded-md border border-hazard bg-background p-3 text-sm text-hazard">
+              ⟲ Showing replay results: saved from an earlier analysis, not a live scan.
+            </p>
+          )}
+
           {failure && (
             <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger p-3 text-sm">
               <span>{failure.message}</span>
-              {failure.retryable && (
-                <button type="button" onClick={() => retry(failure.action)} className="min-h-11 rounded-md border border-danger px-4">
+              {failure.retryable && failure.action && (
+                <button type="button" onClick={() => retry(failure.action!)} className="min-h-11 rounded-md border border-danger px-4">
                   Retry
                 </button>
               )}
@@ -140,7 +168,10 @@ export function Dashboard() {
           )}
 
           {(phase === "idle" || phase === "scanned" || phase === "approved") && (
-            <UploadPanel busy={false} onFile={(file) => void runScan(file)} />
+            <>
+              <UploadPanel busy={false} onFile={(file) => void runScan(file)} />
+              <DemoGallery demos={demos} busy={false} replay={demoMode === "replay"} onPick={(demo) => void runDemo(demo)} />
+            </>
           )}
         </section>
 
@@ -154,6 +185,7 @@ export function Dashboard() {
                 key={scan.scan_id}
                 findings={scan.findings}
                 inventory={inventory}
+                defaultSku={suggestedSku}
                 pending={phase === "approving"}
                 disabled={phase === "approved" || phase === "scanning"}
                 onApprove={(ids, skus) => void runApprove(ids, skus)}

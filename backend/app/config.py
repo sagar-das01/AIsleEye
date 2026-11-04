@@ -29,11 +29,12 @@ class Settings(BaseSettings):
     muse_reasoning_effort: ReasoningEffort = "minimal"
     # SAM matches short noun phrases literally; "floor tape" found nothing on the test scene, a colour did.
     walkway_concept: str = "yellow line"
+    walkway_min_confidence: float = Field(0.6, ge=0.0, le=1.0)
     request_timeout_s: float = 90.0
     # The frontend runs on 3001 because local Langfuse uses 3000.
     cors_origins: list[str] = ["http://localhost:3001", "http://127.0.0.1:3001"]
 
-    agent_runtime: Literal["langchain", "plain"] = "langchain"
+    agent_runtime: Literal["langchain", "plain", "rules"] = "langchain"
     demo_mode: Literal["", "replay"] = ""
     privacy_blur: bool = True
     review_confidence: float = Field(0.6, ge=0.0, le=1.0)

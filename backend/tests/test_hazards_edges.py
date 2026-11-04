@@ -213,9 +213,47 @@ def test_occlusion_handling_stays_fast_for_big_boxes():
     tape[700:760, :] = True
     boxes = []
     for i in range(10):
-        x = i * 140
+        x = 20 + i * 140
         tape[700:760, x : x + 120] = False
         boxes.append(seg(f"b{i}", rect(x, 600, x + 120, 860, side)))
     start = time.perf_counter()
     findings = hazards.detect_blocked_walkways(boxes, [seg("w", tape)])
     assert len(findings) == 10 and time.perf_counter() - start < 5
+
+
+def test_a_hole_somewhat_wider_than_the_box_is_still_closed():
+    # SAM's tape mask stops a few pixels before the box edge on each side.
+    box = seg("b", rect(15, 12, 25, 32))
+    stripe = rect(0, 15, SIDE, 25)
+    stripe[:, 12:28] = False
+    [finding] = hazards.detect_blocked_walkways([box], [seg("w", stripe)])
+    assert finding.id == "hz_b"
+
+
+def test_separate_walkway_markings_are_not_bridged_into_one_region():
+    # A lane and a rack beam 40 px apart: the space between them is not walkway.
+    side = 160
+    lane = seg("lane", rect(0, 100, side, 110, side))
+    beam = seg("beam", rect(0, 20, side, 30, side), conf=0.9)
+    between = seg("b", rect(60, 50, 80, 70, side))
+    assert hazards.detect_blocked_walkways([between], [lane, beam]) == []
+
+
+def test_a_box_that_only_touches_a_weak_walkway_still_reports_that_walkways_confidence():
+    box = seg("b", rect(0, 0, 10, 10), conf=0.95)
+    [finding] = hazards.detect_blocked_walkways([box], [seg("w", rect(0, 0, 10, 10), conf=0.61)])
+    assert finding.confidence == pytest.approx(0.61)
+
+
+def test_a_marking_that_runs_off_the_photo_is_not_thickened_at_the_border():
+    # Closing near the image border must not invent walkway: the stripe keeps its own thickness.
+    stripe = rect(0, 15, SIDE, 22)
+    closed = hazards.close_mask(stripe, 6, edges=(True, True, True, True))
+    assert np.array_equal(closed, stripe)
+
+
+def test_a_box_hiding_the_end_of_a_marking_at_the_border_is_not_assumed_to_stand_on_it():
+    box = seg("b", rect(0, 12, 12, 28))
+    stripe = rect(0, 15, SIDE, 25)
+    stripe[:, 0:12] = False
+    assert hazards.detect_blocked_walkways([box], [seg("w", stripe)]) == []

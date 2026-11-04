@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
-import { ApiError, api, type ApproveResult, type ScanResult } from "@/lib/api";
+import { ApiError, api, type ApproveResult, type DemoPhoto, type ScanResult } from "@/lib/api";
 import { makeApprove, makeScan, photo } from "@/test-fixtures";
 
 import { Dashboard } from "./Dashboard";
@@ -24,6 +24,8 @@ beforeEach(() => {
   approve = vi.spyOn(api, "approve").mockResolvedValue(makeApprove());
   tickets = vi.spyOn(api, "tickets").mockResolvedValue([]);
   vi.spyOn(api, "inventory").mockResolvedValue({ "SKU-1042": { available: 5, quarantine: 3 }, "SKU-2": { available: 1, quarantine: 2 } });
+  vi.spyOn(api, "demos").mockResolvedValue([]);
+  vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "" });
 });
 
 afterEach(() => {
@@ -202,5 +204,87 @@ describe("Dashboard: approving", () => {
     await screen.findByText("Create incident ticket");
     expect(approve).toHaveBeenLastCalledWith("0123456789abcdef", ["dmg_box_0"], {});
     expect(approve).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+const DEMOS: DemoPhoto[] = [
+  { id: "damaged_crushed", title: "Crushed corner", description: "One caved-in box.", sku: "SKU-1042", scan_id: "0123456789abcdef", image_url: "/demo/damaged_crushed.jpg", pinned: true },
+  { id: "clean_pallet_a", title: "Clean pallet", description: "Nothing wrong.", sku: null, scan_id: "fedcba9876543210", image_url: "/demo/clean_pallet_a.jpg", pinned: true },
+];
+
+describe("Dashboard: demo photos and replay", () => {
+  it("lists the demo photos and scans the one you pick, suggesting its SKU", async () => {
+    vi.spyOn(api, "demos").mockResolvedValue(DEMOS);
+    const file = photo("damaged_crushed.jpg");
+    const demoPhoto = vi.spyOn(api, "demoPhoto").mockResolvedValue(file);
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByRole("button", { name: /Crushed corner/ }));
+    await screen.findByText("Damaged box");
+    expect(demoPhoto).toHaveBeenCalledWith(DEMOS[0]);
+    expect(scan).toHaveBeenCalledWith(file);
+    expect((screen.getByPlaceholderText("e.g. SKU-1042") as HTMLInputElement).value).toBe("SKU-1042");
+  });
+
+  it("does not prefill a SKU for a demo that has none, and never for a normal upload", async () => {
+    vi.spyOn(api, "demos").mockResolvedValue(DEMOS);
+    vi.spyOn(api, "demoPhoto").mockResolvedValue(photo("clean_pallet_a.jpg"));
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByRole("button", { name: /Clean pallet/ }));
+    await screen.findByText("Damaged box");
+    expect((screen.getByPlaceholderText("e.g. SKU-1042") as HTMLInputElement).value).toBe("");
+  });
+
+  it("shows no gallery when the backend lists no demo photos or cannot be reached", async () => {
+    vi.spyOn(api, "demos").mockRejectedValue(new Error("down"));
+    render(<Dashboard />);
+    expect(await screen.findByText("Upload a warehouse photo to scan")).toBeDefined();
+    expect(screen.queryByText("Or try a demo photo")).toBeNull();
+  });
+
+  it("explains a demo photo that cannot be loaded", async () => {
+    vi.spyOn(api, "demos").mockResolvedValue(DEMOS);
+    vi.spyOn(api, "demoPhoto").mockRejectedValue(new ApiError("GET failed: 404", 404));
+    render(<Dashboard />);
+    fireEvent.click(await screen.findByRole("button", { name: /Crushed corner/ }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Couldn't load that demo photo/);
+    expect(scan).not.toHaveBeenCalled();
+  });
+
+  it("shows no replay banner during a live session", async () => {
+    await upload();
+    await screen.findByText("Damaged box");
+    expect(screen.queryByLabelText("Replay notice")).toBeNull();
+  });
+
+  it("shows a clear replay banner for the whole session when the backend is in replay mode", async () => {
+    vi.spyOn(api, "health").mockResolvedValue({ status: "ok", models: { vision_agent: "m", segmentation: "s" }, demo_mode: "replay" });
+    vi.spyOn(api, "demos").mockResolvedValue(DEMOS);
+    render(<Dashboard />);
+    expect((await screen.findByLabelText("Replay notice")).textContent).toMatch(/replay results.*not a live scan/);
+    expect(screen.getByText(/only the demo photos have saved results/)).toBeDefined();
+  });
+
+  it("shows the banner when a result was replayed after the live service failed", async () => {
+    scan.mockResolvedValue(makeScan({ replay: true }));
+    await upload();
+    await screen.findByText("Damaged box");
+    expect(screen.getByLabelText("Replay notice")).toBeDefined();
+  });
+
+  it("says so when replay mode has no saved result for an uploaded photo", async () => {
+    scan.mockRejectedValue(new ApiError("POST /scan failed: 404", 404, "No saved replay result for this photo. Choose one of the demo photos."));
+    await upload();
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/No saved replay result/);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("tells the supervisor when the built-in rules dispatched instead of the AI agent", async () => {
+    approve.mockResolvedValue(makeApprove({ fallback: "rules" }));
+    await upload();
+    await screen.findByText("Damaged box");
+    fireEvent.click(screen.getByRole("button", { name: /Approve & Dispatch/ }));
+    expect(await screen.findByText(/built-in rules dispatched these actions/)).toBeDefined();
   });
 });

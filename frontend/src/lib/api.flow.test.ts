@@ -69,3 +69,20 @@ describe("read calls and links", () => {
     expect(pdfUrl({ pdf_url: "/tickets/T-1.pdf" })).toBe(`${API_URL}/tickets/T-1.pdf`);
   });
 });
+
+describe("demo photos", () => {
+  it("lists demos and downloads one as a JPEG file named after it", async () => {
+    stubFetch(new Response(JSON.stringify([{ id: "a" }])));
+    await expect(api.demos()).resolves.toEqual([{ id: "a" }]);
+    const fetchMock = stubFetch(new Response(new Uint8Array([1, 2, 3])));
+    const file = await api.demoPhoto({ id: "damaged_crushed", image_url: "/demo/damaged_crushed.jpg" });
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API_URL}/demo/damaged_crushed.jpg`);
+    expect(file).toBeInstanceOf(File);
+    expect([file.name, file.type, file.size]).toEqual(["damaged_crushed.jpg", "image/jpeg", 3]);
+  });
+
+  it("raises an ApiError when the demo photo is missing", async () => {
+    stubFetch(new Response("", { status: 404 }));
+    await expect(api.demoPhoto({ id: "x", image_url: "/demo/x.jpg" })).rejects.toMatchObject({ status: 404 });
+  });
+});

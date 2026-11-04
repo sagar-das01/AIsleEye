@@ -342,11 +342,6 @@ def corrupt(cache_dir, scan_id, payload):
     (cache_dir / f"{scan_id}.json").write_text(payload)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP: load_cached() lets a corrupt/old-schema cache file raise, so /scan returns 500 forever for that photo; "
-    "it should treat the entry as a miss, rescan and overwrite it",
-)
 @pytest.mark.parametrize("payload", ["", "{not json", "{}", '{"scan_id": "x"}', "null"])
 def test_corrupt_cache_entry_is_treated_as_a_miss(fake, cache_dir, payload):
     data = image_bytes()
@@ -354,10 +349,6 @@ def test_corrupt_cache_entry_is_treated_as_a_miss(fake, cache_dir, payload):
     assert post(data, c=safe_client).status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP: GET /scan/{id} on a corrupt cache file returns 500; a missing-or-unreadable scan should be 404",
-)
 def test_get_scan_on_a_corrupt_entry_is_404_not_500(cache_dir):
     corrupt(cache_dir, "0123456789abcdef", "{not json")
     assert safe_client.get("/scan/0123456789abcdef").status_code == 404
@@ -390,3 +381,33 @@ def test_scan_listing_is_not_exposed():
 def test_get_scan_is_read_only():
     for method in ("post", "put", "delete"):
         assert getattr(client, method)("/scan/0123456789abcdef").status_code in (404, 405)
+
+
+def test_weak_walkway_matches_are_dropped_before_they_can_cause_hazards(monkeypatch):
+    def handler(kw):
+        if kw["model"] == "sam-3.1":
+            w, h = sent_size(kw)
+            if fakes.concept_of(kw) == "cardboard box":
+                return fakes.sam_line(fakes.sam_record(0, w // 5, h // 3, w // 2, h * 3 // 4, w=w, h=h, c=0.95))
+            return fakes.sam_line(fakes.sam_record(0, 0, h * 5 // 8, w - 1, h * 3 // 4, w=w, h=h, c=0.45))
+        return reply(damaged=False)
+
+    fakes.install_fake_model(monkeypatch, handler)
+    body = post(image_bytes()).json()
+    assert [o["label"] for o in body["objects"]] == ["box"]
+    assert body["findings"] == []
+
+
+@pytest.mark.parametrize(("confidence", "kept"), [(0.59, False), (0.6, True), (0.9, True)])
+def test_walkway_confidence_floor_boundary(monkeypatch, confidence, kept):
+    def handler(kw):
+        if kw["model"] != "sam-3.1":
+            return reply(damaged=False)
+        w, h = sent_size(kw)
+        if fakes.concept_of(kw) == "cardboard box":
+            return fakes.sam_line(fakes.sam_record(0, w // 5, h // 3, w // 2, h * 3 // 4, w=w, h=h, c=0.95))
+        return fakes.sam_line(fakes.sam_record(0, 0, h * 5 // 8, w - 1, h * 3 // 4, w=w, h=h, c=confidence))
+
+    fakes.install_fake_model(monkeypatch, handler)
+    labels = [o["label"] for o in post(image_bytes()).json()["objects"]]
+    assert ("walkway" in labels) is kept

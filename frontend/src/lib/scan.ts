@@ -35,6 +35,9 @@ export function describeError(error: unknown): FriendlyError {
     if ([413, 415, 422].includes(error.status)) {
       return { message: error.detail ?? "That photo could not be used.", retryable: false };
     }
+    if (error.status === 404) {
+      return { message: error.detail ?? "Nothing was found for that request.", retryable: false };
+    }
     return { message: "Something went wrong on the server. Please try again.", retryable: true };
   }
   return { message: "Can't reach the backend. Check that it is running, then try again.", retryable: true };

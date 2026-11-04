@@ -10,15 +10,18 @@ interface Props {
   inventory: Inventory;
   pending: boolean;
   disabled: boolean;
+  defaultSku?: string;
   onApprove: (findingIds: string[], skus: Record<string, string>) => void;
 }
 
 const SEVERITY_STYLE = { low: "text-zinc-300", medium: "text-hazard", high: "text-danger" } as const;
 const TYPE_LABEL = { box_damage: "Damaged box", walkway_blocked: "Blocked walkway" } as const;
 
-export function FindingsList({ findings, inventory, pending, disabled, onApprove }: Props) {
+export function FindingsList({ findings, inventory, pending, disabled, defaultSku, onApprove }: Props) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
-  const [skus, setSkus] = useState<Record<string, string>>({});
+  const [skus, setSkus] = useState<Record<string, string>>(() =>
+    defaultSku ? Object.fromEntries(findings.filter((f) => f.type === "box_damage").map((f) => [f.id, defaultSku])) : {},
+  );
 
   const selected = findings.filter((f) => !excluded.has(f.id));
   const locked = pending || disabled;

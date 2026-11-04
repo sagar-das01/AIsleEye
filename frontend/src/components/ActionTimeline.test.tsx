@@ -59,4 +59,14 @@ describe("ActionTimeline", () => {
     render(<ActionTimeline result={makeApprove({ tickets: [] })} />);
     expect(screen.queryByRole("link")).toBeNull();
   });
+
+  it("says when the built-in rules dispatched instead of the AI agent", () => {
+    render(<ActionTimeline result={makeApprove({ fallback: "rules" })} />);
+    expect(screen.getByRole("status").textContent).toMatch(/AI agent was unavailable/);
+  });
+
+  it("stays quiet about fallbacks otherwise", () => {
+    render(<ActionTimeline result={makeApprove({ fallback: null })} />);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

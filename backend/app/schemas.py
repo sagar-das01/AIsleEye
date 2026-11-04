@@ -52,3 +52,4 @@ class ScanResult(BaseModel):
     objects: list[DetectedObject]
     findings: list[Finding]
     timings_ms: dict[str, int]
+    replay: bool = Field(default=False, description="True when served from saved demo results instead of a live analysis.")
