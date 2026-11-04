@@ -45,7 +45,7 @@ def test_readme_names_the_configured_default_models():
 
 
 def test_readme_does_not_ship_a_real_looking_key():
-    assert not re.search(r"MODEL_API_KEY\s*=\s*(?!your|<|\.\.\.|xxx|changeme)\S{12,}", README, re.I)
+    assert not re.search(r"MODEL_API_KEY[ \t]*=[ \t]*(?!your|<|\.\.\.|xxx|changeme)\S{12,}", README, re.I)
 
 
 def test_license_and_dataset_attribution_present():

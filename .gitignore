@@ -5,3 +5,7 @@ plan/
 .venv/
 __pycache__/
 backend/data/smoke/
+.coverage
+htmlcov/
+
+infra/langfuse/.env
