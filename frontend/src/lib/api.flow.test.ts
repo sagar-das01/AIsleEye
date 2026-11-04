@@ -74,7 +74,7 @@ describe("demo photos", () => {
   it("lists demos and downloads one as a JPEG file named after it", async () => {
     stubFetch(new Response(JSON.stringify([{ id: "a" }])));
     await expect(api.demos()).resolves.toEqual([{ id: "a" }]);
-    const fetchMock = stubFetch(new Response(new Uint8Array([1, 2, 3])));
+    const fetchMock = stubFetch(new Response("abc"));
     const file = await api.demoPhoto({ id: "damaged_crushed", image_url: "/demo/damaged_crushed.jpg" });
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_URL}/demo/damaged_crushed.jpg`);
     expect(file).toBeInstanceOf(File);
