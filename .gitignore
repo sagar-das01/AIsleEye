@@ -17,6 +17,8 @@ backend/data/tickets/
 backend/data/approvals/
 backend/data/access.json
 datasets/
+# Raw dataset downloads at the repository root. backend/data holds tracked demo results, so it is not ignored as a whole.
+/data/
 backend/data/feedback.jsonl
 backend/data/mlflow/
 backend/data/scores.jsonl
